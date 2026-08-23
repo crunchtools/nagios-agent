@@ -36,7 +36,10 @@ COPY rootfs/ /
 
 RUN chmod +x /usr/local/nagios/libexec/check_mem.sh \
              /usr/local/nagios/libexec/check_systemd_units.sh \
-             /usr/local/nagios/libexec/check_tcp_local.sh
+             /usr/local/nagios/libexec/check_tcp_local.sh \
+             /usr/local/nagios/libexec/check_diskio.sh \
+             /usr/local/nagios/libexec/check_cpu_stats.sh \
+             /usr/local/nagios/libexec/check_net_throughput.sh
 
 EXPOSE 5666
 
