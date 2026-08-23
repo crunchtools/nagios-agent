@@ -10,7 +10,7 @@ check() {
     local desc="$1"
     shift
     local output
-    if output=$(eval "$@" 2>&1); then
+    if output=$("$@" 2>&1); then
         echo "  PASS: $desc"
         PASS=$((PASS + 1))
     else
