@@ -22,6 +22,8 @@ RUN microdnf install -y \
     nagios-plugins-procs \
     nagios-plugins-users \
     nagios-plugins-tcp \
+    nagios-plugins-ping \
+    iputils \
     procps-ng \
     iproute \
     && microdnf clean all
