@@ -1,0 +1,36 @@
+name: Build and Push Container Image
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly Monday rebuild
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t nagios-agent:test -f Containerfile .
+
+      - name: Run tests
+        run: |
+          chmod +x tests/test-image.sh
+          RUNTIME=docker IMAGE=nagios-agent:test ./tests/test-image.sh
+
+      - name: Login to Quay.io
+        if: github.ref == 'refs/heads/master'
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Push to Quay.io
+        if: github.ref == 'refs/heads/master'
+        run: |
+          docker tag nagios-agent:test quay.io/crunchtools/nagios-agent:latest
+          docker push quay.io/crunchtools/nagios-agent:latest
