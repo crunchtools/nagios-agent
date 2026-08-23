@@ -46,6 +46,12 @@ check "check_mem script exists" \
 check "check_systemd_units script exists" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_systemd_units.sh"
 
+check "check_tcp plugin exists" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_tcp"
+
+check "check_tcp_local script exists" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_tcp_local.sh"
+
 echo ""
 echo "=== Runtime tests ==="
 

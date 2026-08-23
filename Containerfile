@@ -21,6 +21,7 @@ RUN microdnf install -y \
     nagios-plugins-swap \
     nagios-plugins-procs \
     nagios-plugins-users \
+    nagios-plugins-tcp \
     procps-ng \
     iproute \
     && microdnf clean all
@@ -32,7 +33,8 @@ RUN subscription-manager unregister 2>/dev/null || true
 COPY rootfs/ /
 
 RUN chmod +x /usr/local/nagios/libexec/check_mem.sh \
-             /usr/local/nagios/libexec/check_systemd_units.sh
+             /usr/local/nagios/libexec/check_systemd_units.sh \
+             /usr/local/nagios/libexec/check_tcp_local.sh
 
 EXPOSE 5666
 
