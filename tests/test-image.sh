@@ -23,28 +23,28 @@ check() {
 echo "=== Static tests ==="
 
 check "nrpe binary exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/sbin/nrpe"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/sbin/nrpe"
 
 check "nrpe config exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -f /etc/nagios/nrpe.cfg"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -f /etc/nagios/nrpe.cfg"
 
 check "check_load plugin exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_load"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_load"
 
 check "check_disk plugin exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_disk"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_disk"
 
 check "check_swap plugin exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_swap"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_swap"
 
 check "check_procs plugin exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_procs"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/lib64/nagios/plugins/check_procs"
 
 check "check_mem script exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_mem.sh"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_mem.sh"
 
 check "check_systemd_units script exists" \
-    $RUNTIME run --rm --entrypoint /bin/sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_systemd_units.sh"
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_systemd_units.sh"
 
 echo ""
 echo "=== Runtime tests ==="

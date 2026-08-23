@@ -16,6 +16,11 @@ jobs:
         run: |
           DOCKER_BUILDKIT=1 docker build --load -t nagios-agent:test -f Containerfile .
 
+      - name: Verify image loaded
+        run: |
+          docker images nagios-agent:test
+          docker run --rm --entrypoint sh nagios-agent:test -c "ls -la /usr/sbin/nrpe /usr/lib64/nagios/plugins/check_load" || true
+
       - name: Run tests
         run: |
           chmod +x tests/test-image.sh
