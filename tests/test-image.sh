@@ -9,11 +9,13 @@ FAIL=0
 check() {
     local desc="$1"
     shift
-    if eval "$@" >/dev/null 2>&1; then
+    local output
+    if output=$(eval "$@" 2>&1); then
         echo "  PASS: $desc"
         PASS=$((PASS + 1))
     else
         echo "  FAIL: $desc"
+        [ -n "$output" ] && echo "        $output"
         FAIL=$((FAIL + 1))
     fi
 }

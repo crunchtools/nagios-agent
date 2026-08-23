@@ -14,7 +14,7 @@ jobs:
 
       - name: Build image
         run: |
-          docker build -t nagios-agent:test -f Containerfile .
+          DOCKER_BUILDKIT=1 docker build --load -t nagios-agent:test -f Containerfile .
 
       - name: Run tests
         run: |
