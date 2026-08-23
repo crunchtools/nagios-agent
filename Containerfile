@@ -9,9 +9,12 @@ RUN --mount=type=secret,id=activation_key \
             --org="$(cat /run/secrets/org_id)"; \
     fi
 
-# Install NRPE daemon and check plugins from EPEL
-RUN microdnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm && \
-    microdnf install -y \
+# Install EPEL repo RPM (microdnf can't install from URLs, use rpm directly)
+RUN curl -sLo /tmp/epel.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm && \
+    rpm -ivh /tmp/epel.rpm && rm -f /tmp/epel.rpm
+
+# Install NRPE daemon and check plugins
+RUN microdnf install -y \
     nrpe \
     nagios-plugins-load \
     nagios-plugins-disk \
@@ -19,6 +22,7 @@ RUN microdnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-lates
     nagios-plugins-procs \
     nagios-plugins-users \
     procps-ng \
+    iproute \
     && microdnf clean all
 
 # Unregister from RHSM to avoid leaking entitlements
