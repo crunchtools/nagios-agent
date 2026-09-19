@@ -6,7 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Removed identifiable data from config destined for this public repo, per
+  universal constitution XVII. `nrpe-ctr.cfg` carried four Cloudflare zone IDs
+  and two mail addresses inline as check arguments. Neither is a credential —
+  the Cloudflare API token was already a separate host-side file — but zone IDs
+  map infrastructure to an owner and there is no reason to publish either.
+  `check_cloudflare_status.sh` now takes `<domain>` and `check_google_oauth.sh`
+  takes `<account-key>`, both resolving the real value host-side from
+  `cloudflare-zones.conf` / `google-accounts.conf`. The repo carries only
+  `.conf.example` files showing the shape.
+
 ### Added
+
+- `deploy/nagios-agent/` and `deploy/systemd/` — the deployed NRPE configs and
+  both agent unit files, captured into git for the first time. These decide
+  whether anyone gets paged and previously existed only on lotor's filesystem.
+- `deploy/nagios/backup-freshness.cfg` — likewise.
+- `check_google_oauth.sh` — brought into the repo (sanitized); it is named as a
+  reference implementation by universal constitution XVI but was in no repo.
 
 - `check_container_restart.sh` — alerts on a container that restarted inside a
   configurable window. Detects the failure mode behind RT #1459: a container is

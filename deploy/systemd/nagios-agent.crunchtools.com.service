@@ -1,0 +1,19 @@
+[Unit]
+Description=Podman container - nagios-agent.crunchtools.com (NRPE Agent)
+Documentation=https://github.com/crunchtools/nagios-agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStartPre=/usr/bin/sleep 1.5
+ExecStartPre=-/usr/bin/podman rm -f nagios-agent.crunchtools.com
+ExecStartPre=/usr/bin/chmod 666 /run/podman/podman.sock
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent.crunchtools.com.service   --memory=1g --memory-swap=1g   --rm   --name nagios-agent.crunchtools.com   --network=host   --pid=host   --privileged   -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /usr/bin/rclone:/usr/local/bin/rclone:ro   -v /etc/rclone.conf:/etc/nagios/rclone.conf:ro   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   -v /var/lib/srv-git-drift:/var/lib/srv-git-drift:ro   quay.io/crunchtools/nagios-agent:latest
+ExecStop=/usr/bin/podman stop -t 10 nagios-agent.crunchtools.com
+ExecStopPost=/usr/bin/podman rm -f nagios-agent.crunchtools.com
+
+[Install]
+WantedBy=multi-user.target
