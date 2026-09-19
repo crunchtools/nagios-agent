@@ -1,0 +1,12 @@
+# Cloudflare zone IDs for check_cloudflare_status.sh
+#
+# Deploy to: /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf
+# Mounted read-only at /etc/nagios/cloudflare-zones.conf in the agent.
+#
+# The real file is NOT in this repo. Zone IDs identify an account's zones, and
+# this repo is public — see constitution XVII. The API token is a separate file
+# (cloudflare.token) and is likewise host-side only.
+#
+# <domain> <zone-id>
+example.com            00000000000000000000000000000000
+example.org            00000000000000000000000000000000

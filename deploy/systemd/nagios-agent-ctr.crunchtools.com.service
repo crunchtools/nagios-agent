@@ -1,0 +1,29 @@
+[Unit]
+# SLOW POOL — podman-backed container checks + external-API checks, port 5667.
+#
+# Split out of nagios-agent.crunchtools.com on 2026-08-26. That single daemon
+# carried all 176 checks; 135 of them block on the podman container-state
+# database or on somebody else's API. Under load they queued, and the cheap
+# /proc-reading host diagnostics died alongside them — so the box went blind
+# precisely when it was unhealthy.
+#
+# This container is ALLOWED to be slow. Its Nagios liveness probe
+# ("NRPE daemon (containers)") is the dependency parent for every check it
+# serves, so when it degrades the result is one correlated alert, not 135.
+Description=Podman container - nagios-agent-ctr.crunchtools.com (NRPE Agent, container pool)
+Documentation=https://github.com/crunchtools/nagios-agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStartPre=/usr/bin/sleep 1.5
+ExecStartPre=-/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent-ctr.crunchtools.com.service   --memory=384m --memory-swap=384m   --rm   --name nagios-agent-ctr.crunchtools.com   --network=host   --pid=host   --privileged   -v /srv/nagios-agent.crunchtools.com/config/nrpe-ctr.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf:/etc/nagios/cloudflare-zones.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/google-accounts.conf:/etc/nagios/google-accounts.conf:ro,Z   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/hermes-probe:/run/hermes-probe:ro -v /run/podman/podman.sock:/run/podman/podman.sock   quay.io/crunchtools/nagios-agent:latest
+ExecStop=/usr/bin/podman stop -t 10 nagios-agent-ctr.crunchtools.com
+ExecStopPost=/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
+
+[Install]
+WantedBy=multi-user.target

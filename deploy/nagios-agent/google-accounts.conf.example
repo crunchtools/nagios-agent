@@ -1,0 +1,11 @@
+# Google Workspace accounts for check_google_oauth.sh
+#
+# Deploy to: /srv/nagios-agent.crunchtools.com/config/google-accounts.conf
+# Mounted read-only at /etc/nagios/google-accounts.conf in the agent.
+#
+# The real file is NOT in this repo — these are mail addresses and this repo is
+# public (constitution XVII). nrpe.cfg references only the opaque key.
+#
+# <key> <container> <credential-path-in-container> <label>
+personal  mcp-gw-personal  /credentials/someone@example.com.json   someone@example.com
+work      mcp-gw-work      /credentials/someone@example.org.json   someone@example.org

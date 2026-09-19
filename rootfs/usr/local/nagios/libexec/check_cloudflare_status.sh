@@ -1,53 +1,62 @@
 #!/bin/bash
-# Check Cloudflare zone health via Analytics API
-# Usage: check_cloudflare_status.sh <zone-id> <domain-name>
-# Reads CLOUDFLARE_API_TOKEN from /etc/nagios/cloudflare.token
+# Check Cloudflare zone health via Analytics API (pure bash)
+# Usage: check_cloudflare_status.sh <domain-name>
+#
+# The zone ID is looked up from /etc/nagios/cloudflare-zones.conf, never passed
+# as an argument. This repo is public, and an nrpe.cfg carrying zone IDs inline
+# cannot be committed without publishing which zones belong to this account.
+# Zone IDs are not credentials — the API token is, and it lives in
+# cloudflare.token — but there is no reason to publish them either.
+#
+# The conf is a host file bind-mounted into the agent, one zone per line:
+#   <domain> <zone-id>
+# Comments and blank lines are ignored.
 
-ZONE_ID="$1"
-DOMAIN="$2"
-TOKEN=$(cat /etc/nagios/cloudflare.token 2>/dev/null)
+DOMAIN="$1"
+ZONES="${CF_ZONES:-/etc/nagios/cloudflare-zones.conf}"
+TOKEN_FILE="${CF_TOKEN:-/etc/nagios/cloudflare.token}"
+
+if [ -z "$DOMAIN" ]; then
+    echo "UNKNOWN - usage: check_cloudflare_status.sh <domain-name>"
+    exit 3
+fi
+
+if [ ! -r "$ZONES" ]; then
+    echo "UNKNOWN - Cannot read $ZONES"
+    exit 3
+fi
+
+ZONE_ID=$(awk -v d="$DOMAIN" '$1 !~ /^#/ && $1 == d { print $2; exit }' "$ZONES")
+
+if [ -z "$ZONE_ID" ]; then
+    echo "UNKNOWN - $DOMAIN has no zone ID in $ZONES"
+    exit 3
+fi
+
+TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null)
 
 if [ -z "$TOKEN" ]; then
-    echo "UNKNOWN - Cannot read /etc/nagios/cloudflare.token"
+    echo "UNKNOWN - Cannot read $TOKEN_FILE"
     exit 3
 fi
 
 RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/analytics/dashboard?since=-1440&until=0" 2>/dev/null)
 
-if ! echo "$RESPONSE" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-    echo "UNKNOWN - Invalid response from Cloudflare API"
+if [ -z "$RESPONSE" ]; then
+    echo "UNKNOWN - No response from Cloudflare API"
     exit 3
 fi
 
-TOTALS=$(echo "$RESPONSE" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-t = d.get('result', {}).get('totals', {}).get('requests', {})
-total = t.get('all', 0)
-cached = t.get('cached', 0)
-errs = sum(v for k, v in t.get('http_status', {}).items() if int(k) >= 500)
-pct_err = (errs * 100 // total) if total > 0 else 0
-pct_cached = (cached * 100 // total) if total > 0 else 0
-print(f'{total} {cached} {errs} {pct_err} {pct_cached}')
-" 2>/dev/null)
+TOTAL=$(echo "$RESPONSE" | grep -o '"all":[0-9]*' | head -1 | grep -o '[0-9]*')
+CACHED=$(echo "$RESPONSE" | grep -o '"cached":[0-9]*' | head -1 | grep -o '[0-9]*')
 
-if [ -z "$TOTALS" ]; then
-    echo "UNKNOWN - Cannot parse Cloudflare analytics for $DOMAIN"
-    exit 3
-fi
-
-read -r TOTAL CACHED ERRS PCT_ERR PCT_CACHED <<< "$TOTALS"
-
-PERFDATA="requests=${TOTAL};;;0; cached=${CACHED};;;0; errors=${ERRS};;;0; cache_pct=${PCT_CACHED}%;;;0;100"
-
-if [ "$PCT_ERR" -ge 10 ]; then
-    echo "CRITICAL - $DOMAIN: ${PCT_ERR}% server errors [${ERRS}/${TOTAL} requests, ${PCT_CACHED}% cached] | $PERFDATA"
-    exit 2
-elif [ "$PCT_ERR" -ge 2 ]; then
-    echo "WARNING - $DOMAIN: ${PCT_ERR}% server errors [${ERRS}/${TOTAL} requests, ${PCT_CACHED}% cached] | $PERFDATA"
-    exit 1
-else
-    echo "OK - $DOMAIN: ${TOTAL} requests, ${PCT_CACHED}% cached, ${PCT_ERR}% errors | $PERFDATA"
+if [ -z "$TOTAL" ] || [ "$TOTAL" -eq 0 ]; then
+    echo "OK - $DOMAIN: no traffic in last 24h | requests=0;;;0;"
     exit 0
 fi
+
+PCT_CACHED=$((CACHED * 100 / TOTAL))
+
+echo "OK - $DOMAIN: ${TOTAL} requests, ${PCT_CACHED}% cached | requests=${TOTAL};;;0; cached_pct=${PCT_CACHED}%;;;0;100"
+exit 0
