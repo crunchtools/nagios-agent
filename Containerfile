@@ -63,6 +63,17 @@ COPY rootfs/ /
 # Glob so a new plugin cannot be forgotten again.
 RUN chmod +x /usr/local/nagios/libexec/*.sh
 
+# Pristine copy of the released plugins, for check_plugin_drift.sh.
+#
+# The deployed agent bind-mounts /srv over /usr/local/nagios/libexec, so once a
+# container is running there is no way to see what the IMAGE shipped -- which is
+# why the stale-chmod bug above went unnoticed, and why 31 plugins ran in
+# production untracked (RT #1490). This directory is outside the mount point, so
+# it survives the overlay and gives the drift check something to compare against.
+#
+# Must stay AFTER the chmod so modes match and only real content drift reports.
+RUN cp -a /usr/local/nagios/libexec /usr/local/nagios/libexec-released
+
 EXPOSE 5666
 
 LABEL maintainer="fatherlinux <scott.mccarty@crunchtools.com>"
