@@ -20,6 +20,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `check_factory_status.sh` + `deploy/nagios/factory-status.cfg` — surfaces the
+  factory watchdog's verdict to Nagios (RT #1478). The watchdog evaluates every
+  repo in the org hourly and its only alerting path was a Zabbix trapper that
+  died with RT #1459, so ~47 repos' health went to a closed socket. Reads the
+  status file straight off the host bind mount — no credential, no podman exec,
+  no dependency on the dashboard process. Staleness is the CRITICAL case.
 - `deploy/nagios-agent/` and `deploy/systemd/` — the deployed NRPE configs and
   both agent unit files, captured into git for the first time. These decide
   whether anyone gets paged and previously existed only on lotor's filesystem.
