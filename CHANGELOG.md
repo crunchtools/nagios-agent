@@ -6,7 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Security
+### Fixed
+
+- `check_quay_pull_source.sh` reported OK when it could not run (RT #1481). It
+  read host units via `nsenter -t 1 -m`, which needs CAP_SYS_ADMIN and root;
+  NRPE runs plugins as `nrpe`, so the nsenter always failed, and every failure
+  mode collapsed into the same empty-string branch with stderr discarded. It
+  now reads the read-only `/etc/systemd/system` bind mount that RT #1477 added,
+  and exits UNKNOWN when the mount is missing, unreadable or empty. Unreadable
+  entries — mostly enablement symlinks into the unmounted `/usr/lib/systemd/system`
+  — are skipped and counted rather than aborting the scan. Verified in the agent
+  container as `nrpe`: 55 units scanned, 3 skipped, 0 violations.
+- `check_systemd_units.sh` had never once looked at the host (found during the
+  RT #1481 sweep). The container has no `/run/systemd` and no system bus, so
+  `systemctl` answers "Running in chroot, ignoring command" as root and "System
+  has not been booted with systemd as init system" as `nrpe`. The old code piped
+  that into `grep -c`, got 0, and printed "OK - No failed systemd units"
+  unconditionally — the host had 529 units and the container saw none. It now
+  checks systemctl's exit status, treats any stderr as proof it did not query,
+  and confirms a live manager via `systemctl is-system-running` before trusting
+  a zero count. This does not restore host visibility, which needs a bus socket
+  or a privilege split and is tracked separately; it stops the check lying.
 
 - Removed identifiable data from config destined for this public repo, per
   universal constitution XVII. `nrpe-ctr.cfg` carried four Cloudflare zone IDs
