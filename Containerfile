@@ -34,13 +34,14 @@ RUN subscription-manager unregister 2>/dev/null || true
 # Overlay custom configs and check scripts
 COPY rootfs/ /
 
-RUN chmod +x /usr/local/nagios/libexec/check_mem.sh \
-             /usr/local/nagios/libexec/check_systemd_units.sh \
-             /usr/local/nagios/libexec/check_quay_pull_source.sh \
-             /usr/local/nagios/libexec/check_tcp_local.sh \
-             /usr/local/nagios/libexec/check_diskio.sh \
-             /usr/local/nagios/libexec/check_cpu_stats.sh \
-             /usr/local/nagios/libexec/check_net_throughput.sh
+# Plugins are tracked 100644 in git, so COPY lands them non-executable and this
+# chmod is load-bearing. It used to name each file and had silently fallen five
+# plugins behind — check_cloudflare_status, check_container_memory,
+# check_container_running, check_factory_health and check_quay_staleness all
+# shipped unrunnable. Nothing caught it because the deployed agent bind-mounts
+# /srv over this directory, so only a run of the bare image would have noticed.
+# Glob so a new plugin cannot be forgotten again.
+RUN chmod +x /usr/local/nagios/libexec/*.sh
 
 EXPOSE 5666
 

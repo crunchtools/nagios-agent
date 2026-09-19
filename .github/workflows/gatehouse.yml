@@ -1,0 +1,55 @@
+# Gatehouse — fork-safe code review + workflow protection, in ONE file.
+#
+# Required by constitution XII. Nothing is ever checked out from the PR: the
+# change is only ever read as a diff (data), the reviewer logic lives in the
+# pinned gatehouse container, and the rules are fetched from the base branch.
+#
+# Two jobs with DIFFERENT authority:
+#   • guard   — blocking gate. Mark it a REQUIRED status check.
+#   • review  — ADVISORY. Never mark it required; an LLM reviewer is
+#               non-deterministic and must not hold merge authority.
+
+name: Gatehouse
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}   # default-deny; each job grants only what it needs
+
+jobs:
+  guard:
+    name: Protect workflows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Reject workflow changes from untrusted PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR_ASSOC: ${{ github.event.pull_request.author_association }}
+        run: |
+          set -euo pipefail
+          case "$AUTHOR_ASSOC" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Author '$AUTHOR_ASSOC' is trusted; allowing."; exit 0 ;;
+          esac
+          changed="$(gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only)"
+          if echo "$changed" | grep -qE '^\.github/workflows/'; then
+            echo "::error::PR modifies .github/workflows/ — not accepted from external contributors."
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body \
+              $'🚫 **Workflow changes are not accepted via pull request.** Please open an issue and a maintainer will make the change.'
+            exit 1
+          fi
+          echo "No workflow files changed."
+
+  review:
+    name: Gatehouse review
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.2.0
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

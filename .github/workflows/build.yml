@@ -7,6 +7,13 @@ on:
     - cron: '0 8 * * 1'  # Weekly Monday rebuild
 
 jobs:
+  # Blocking AI-slop gate, required by constitution XII. Referenced as a
+  # reusable workflow rather than a copied job body, so fixes in gatehouse
+  # reach this repo on the next CI run (RT #1468).
+  gourmand:
+    name: Code Quality (Gourmand)
+    uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0.5.0
+
   build:
     runs-on: ubuntu-latest
     steps:
