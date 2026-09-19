@@ -26,7 +26,27 @@ RUN microdnf install -y \
     iputils \
     procps-ng \
     iproute \
+    git-core \
     && microdnf clean all
+
+# Dedicated group for podman socket access.
+#
+# Eleven checks talk to /run/podman/podman.sock, but NRPE runs as nrpe and the
+# socket ships 0660 root:root. The workaround on lotor has been an
+# ExecStartPre=chmod 666 in the agent unit. That is blunt, and what actually
+# contains it is /run/podman being 0700 -- a podman default nobody chose and
+# nothing monitors.
+#
+# The socket group cannot be one nrpe already has. These containers run without
+# user namespaces, so in-container GIDs land directly on the host, and 997/998
+# are shared with every WordPress site on lotor. Pointing the socket at either
+# would hand host root to a web server. GID 1500 is unused on the host and in
+# every running container.
+#
+# podman run --group-add does NOT work here: nrpe calls initgroups() when it
+# drops privileges, which rebuilds the group set from this image and discards
+# anything podman supplied. The membership has to be baked in.
+RUN groupadd -g 1500 podmansock && usermod -aG podmansock nrpe
 
 # Unregister from RHSM to avoid leaking entitlements
 RUN subscription-manager unregister 2>/dev/null || true
