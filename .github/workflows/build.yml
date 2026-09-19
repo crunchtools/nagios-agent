@@ -3,6 +3,8 @@ name: Build and Push Container Image
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]  # Build and test only; the push steps below are gated on master
   schedule:
     - cron: '0 8 * * 1'  # Weekly Monday rebuild
 
