@@ -1,12 +1,27 @@
 name: Build and Push Container Image
 
+# Constitution Section III: dual-push to Quay and GHCR as two jobs, gha layer
+# caching on both, Trivy on the published image. RT #1480 sweeps the rest of the
+# fleet; this repo is the pilot.
+#
+# Unlike the mcp-* repos this one runs tests against the built image before
+# publishing it, so the Quay job builds twice: once with load: true so the tests
+# have a local image, then again for the push. The second build is a cache hit,
+# not a rebuild -- that is what cache-to: mode=max buys here.
+
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
-    branches: [master]  # Build and test only; the push steps below are gated on master
+    branches: [master]  # Build and test only; the push steps below are gated
   schedule:
     - cron: '0 8 * * 1'  # Weekly Monday rebuild
+  workflow_dispatch:
+
+env:
+  QUAY_IMAGE: quay.io/crunchtools/nagios-agent
+  GHCR_IMAGE: ghcr.io/crunchtools/nagios-agent
 
 jobs:
   # Blocking AI-slop gate, required by constitution XII. Referenced as a
@@ -16,14 +31,47 @@ jobs:
     name: Code Quality (Gourmand)
     uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0.5.0
 
-  build:
+  build-and-push-quay:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-      - name: Build image
-        run: |
-          DOCKER_BUILDKIT=1 docker build --load -t nagios-agent:test -f Containerfile .
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Quay.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.QUAY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          load: true
+          tags: nagios-agent:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Verify image loaded
         run: |
@@ -35,16 +83,67 @@ jobs:
           chmod +x tests/test-image.sh
           RUNTIME=docker IMAGE=nagios-agent:test ./tests/test-image.sh
 
-      - name: Login to Quay.io
-        if: github.ref == 'refs/heads/master'
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        continue-on-error: true
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.QUAY_IMAGE }}:latest
+          format: "table"
+          exit-code: "0"
+          severity: "CRITICAL,HIGH"
+
+  build-and-push-ghcr:
+    runs-on: ubuntu-latest
+    needs: build-and-push-quay
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: quay.io
-          username: ${{ secrets.QUAY_USERNAME }}
-          password: ${{ secrets.QUAY_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
 
-      - name: Push to Quay.io
-        if: github.ref == 'refs/heads/master'
-        run: |
-          docker tag nagios-agent:test quay.io/crunchtools/nagios-agent:latest
-          docker push quay.io/crunchtools/nagios-agent:latest
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
