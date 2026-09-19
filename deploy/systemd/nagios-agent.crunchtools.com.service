@@ -1,6 +1,47 @@
 [Unit]
 Description=Podman container - nagios-agent.crunchtools.com (NRPE Agent)
 Documentation=https://github.com/crunchtools/nagios-agent
+#
+# DRIFT MOUNTS (RT #1477). /var/srv and /etc/systemd/system are mounted ro so
+# the drift checks can measure both doors from inside the container, which
+# retired srv-git-drift.timer and its root collector.
+#
+#   NO :Z ON THESE TWO. Relabelling /var/srv would rewrite ~50 service trees to
+#   a private container label and clobber the config/env files that need etc_t.
+#   This container is --privileged, so it reads var_t and etc_t unrelabelled.
+#
+# The plugins run as nrpe and cannot read the tree directly -- certbot archive
+# *.pem dirs are 0700 root and abort git with exit 141. They shell back through
+# podman_exec.sh to run srv-drift-collect.sh as root in this same container.
+# That split is load-bearing; do not "simplify" it away.
+#
+# The socket is reached as nrpe via the podmansock group (GID 1500, baked into
+# the image), not via a chmod 666 here. See
+# /etc/systemd/system/podman.socket.d/podmansock.conf, whose /srv copy sits
+# beside this file. Restart this unit after that drop-in changes: systemd
+# recreates the socket file and this bind mount would hold a stale inode.
+#
+# SYSTEMD RUNTIME MOUNTS (RT #1488). check_systemd_units.sh needs a live host
+# manager, and BOTH mounts are required -- measured, not guessed:
+#
+#   neither                -> "System has not been booted with systemd as init
+#                             system (PID 1)", exit 1. The container has its own
+#                             /run/systemd with no system/ or private/ in it, so
+#                             systemd concludes it is not booted.
+#   /run/systemd only      -> "Failed to connect to system scope bus via local
+#                             transport: No such file or directory", exit 1.
+#   both                   -> exit 0, is-system-running = running, full unit list.
+#
+# The bus socket canNOT be :ro -- connecting to a unix socket needs write. It is
+# a root-equivalent control channel to host systemd. That grants this container
+# nothing it did not already have (--privileged --pid=host with the podman socket
+# mounted), but do not copy this pattern into an unprivileged container.
+#
+# NO :Z on either. Relabelling host runtime state would break systemd and dbus
+# for the whole box. This container is --privileged and reads them unrelabelled.
+#
+# Note /etc/systemd/system above is unit FILES on disk (drift checking). It is
+# not a substitute for this: it says what is defined, never what is running.
 Wants=network-online.target
 After=network-online.target
 
@@ -10,8 +51,7 @@ Restart=always
 RestartSec=10
 ExecStartPre=/usr/bin/sleep 1.5
 ExecStartPre=-/usr/bin/podman rm -f nagios-agent.crunchtools.com
-ExecStartPre=/usr/bin/chmod 666 /run/podman/podman.sock
-ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent.crunchtools.com.service   --memory=1g --memory-swap=1g   --rm   --name nagios-agent.crunchtools.com   --network=host   --pid=host   --privileged   -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /usr/bin/rclone:/usr/local/bin/rclone:ro   -v /etc/rclone.conf:/etc/nagios/rclone.conf:ro   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   -v /var/lib/srv-git-drift:/var/lib/srv-git-drift:ro   quay.io/crunchtools/nagios-agent:latest
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent.crunchtools.com.service   --memory=1g --memory-swap=1g   --rm   --name nagios-agent.crunchtools.com   --network=host   --pid=host   --privileged   -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /usr/bin/rclone:/usr/local/bin/rclone:ro   -v /etc/rclone.conf:/etc/nagios/rclone.conf:ro   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /var/srv:/var/srv:ro   -v /etc/systemd/system:/etc/systemd/system:ro   -v /run/podman/podman.sock:/run/podman/podman.sock   -v /run/systemd:/run/systemd:ro   -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket   quay.io/crunchtools/nagios-agent:latest
 ExecStop=/usr/bin/podman stop -t 10 nagios-agent.crunchtools.com
 ExecStopPost=/usr/bin/podman rm -f nagios-agent.crunchtools.com
 
