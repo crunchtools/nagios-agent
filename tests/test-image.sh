@@ -52,6 +52,18 @@ check "check_tcp plugin exists" \
 check "check_tcp_local script exists" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -x /usr/local/nagios/libexec/check_tcp_local.sh"
 
+check "git available" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "command -v git"
+
+check "podmansock group exists at gid 1500" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "getent group podmansock | grep -q :1500:"
+
+# Guards the mechanism, not just the config. NRPE calls initgroups() when it
+# drops privileges, rebuilding the group set from this image -- so membership
+# has to be visible in `id nrpe` or socket access silently breaks at runtime.
+check "nrpe is in podmansock" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "id -nG nrpe | grep -qw podmansock"
+
 echo ""
 echo "=== Runtime tests ==="
 
