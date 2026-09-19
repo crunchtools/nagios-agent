@@ -36,6 +36,7 @@ COPY rootfs/ /
 
 RUN chmod +x /usr/local/nagios/libexec/check_mem.sh \
              /usr/local/nagios/libexec/check_systemd_units.sh \
+             /usr/local/nagios/libexec/check_quay_pull_source.sh \
              /usr/local/nagios/libexec/check_tcp_local.sh \
              /usr/local/nagios/libexec/check_diskio.sh \
              /usr/local/nagios/libexec/check_cpu_stats.sh \
