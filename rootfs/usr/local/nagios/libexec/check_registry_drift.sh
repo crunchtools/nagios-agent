@@ -108,34 +108,27 @@ ghcr_tags() {
     return 0
 }
 
-untagged=""; missing=""; unknown=""; clean=0; total=0; skipped=0
-seen_untagged=""
-
-while read -r repo img flag; do
-    case "$repo" in ''|\#*) continue ;; esac
+# One image in, one verdict line out. Everything network-bound lives in here so
+# the images can be checked concurrently; the verdicts are tallied afterwards by
+# a single reader, which keeps the counting logic sequential and easy to follow.
+check_one() {
+    local repo=$1 img=$2 flag=${3:-} tag gaps qt gt
 
     # A fork's git tags are upstream's releases, not versions of the image we
     # publish, so there is nothing here to compare. Quay staleness covers them.
-    if [ "${flag:-}" = "fork" ]; then
-        skipped=$((skipped + 1))
-        continue
+    if [ "$flag" = "fork" ]; then
+        printf 'SKIPPED\n'
+        return
     fi
 
-    total=$((total + 1))
-
     if ! tag=$(newest_tag "$repo"); then
-        unknown="$unknown ${img}(git)"
-        continue
+        printf 'UNKNOWN %s(git)\n' "$img"
+        return
     fi
 
     if [ -z "$tag" ]; then
-        # Count the repo once even when it publishes several images; the fix is
-        # one tag, not one per image.
-        case " $seen_untagged " in
-            *" $repo "*) : ;;
-            *) untagged="$untagged $repo"; seen_untagged="$seen_untagged $repo" ;;
-        esac
-        continue
+        printf 'UNTAGGED %s\n' "$repo"
+        return
     fi
 
     gaps=""
@@ -143,23 +136,64 @@ while read -r repo img flag; do
     if qt=$(quay_tags "$img"); then
         tag_present "$qt" "$tag" || gaps="quay"
     else
-        unknown="$unknown ${img}(quay)"
-        continue
+        printf 'UNKNOWN %s(quay)\n' "$img"
+        return
     fi
 
     if gt=$(ghcr_tags "$img"); then
         tag_present "$gt" "$tag" || gaps="${gaps:+$gaps+}ghcr"
     else
-        unknown="$unknown ${img}(ghcr)"
-        continue
+        printf 'UNKNOWN %s(ghcr)\n' "$img"
+        return
     fi
 
     if [ -n "$gaps" ]; then
-        missing="$missing ${img}:${tag}[${gaps}]"
+        printf 'MISSING %s:%s[%s]\n' "$img" "$tag" "$gaps"
     else
-        clean=$((clean + 1))
+        printf 'CLEAN\n'
     fi
-done < "$CONF"
+}
+export -f check_one newest_tag quay_tags ghcr_tags tag_present
+export QUAY_API GHCR ORG GIT_HOST NET_TIMEOUT
+
+# Run the images concurrently. Serially this made ~170 network calls back to
+# back and took ~39s against check_nrpe's 45s ceiling -- 86% of the budget, so
+# any registry latency tipped it to CRITICAL "Socket timeout". It did exactly
+# that three times during one deploy on 2026-09-20, while the underlying answer
+# was a clean 56/56. A monitoring check that cries wolf during deploys, which is
+# precisely when someone is watching, trains everyone to ignore it.
+#
+# Each worker prints one short line and only at the end, and writes under
+# PIPE_BUF are atomic on a pipe, so the verdicts cannot interleave.
+#
+# Sorted on the way out: workers finish in whatever order the network allows,
+# and without this the names in the detail list shuffle between runs of an
+# otherwise unchanged check.
+JOBS=${REGISTRY_DRIFT_JOBS:-8}
+results=$(grep -vE '^[[:space:]]*(#|$)' "$CONF" \
+    | xargs -P "$JOBS" -L1 bash -c 'check_one "$@"' _ \
+    | sort)
+
+untagged=""; missing=""; unknown=""; clean=0; total=0; skipped=0
+seen_untagged=""
+
+while read -r kind value; do
+    case "$kind" in
+        SKIPPED) skipped=$((skipped + 1)) ;;
+        CLEAN)   clean=$((clean + 1));    total=$((total + 1)) ;;
+        UNKNOWN) unknown="$unknown $value"; total=$((total + 1)) ;;
+        MISSING) missing="$missing $value"; total=$((total + 1)) ;;
+        UNTAGGED)
+            total=$((total + 1))
+            # Count the repo once even when it publishes several images; the fix
+            # is one tag, not one per image.
+            case " $seen_untagged " in
+                *" $value "*) : ;;
+                *) untagged="$untagged $value"; seen_untagged="$seen_untagged $value" ;;
+            esac
+            ;;
+    esac
+done <<< "$results"
 
 n_untagged=$(printf '%s' "$untagged" | wc -w)
 n_missing=$(printf '%s' "$missing" | wc -w)
