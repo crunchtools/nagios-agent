@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `deploy/nagios-agent/nrpe-ctr.cfg` and `nrpe-host.cfg` had fallen behind the
+  configs actually running on lotor. The repo documents these as "the agent units
+  and NRPE configs as deployed" and they were not: production carried five command
+  definitions this repo had never seen —
+
+  | file | missing command |
+  |------|-----------------|
+  | nrpe-ctr.cfg | `check_ctr_run_mcp_systemd` |
+  | nrpe-ctr.cfg | `check_ctr_mem_mcp_systemd` |
+  | nrpe-ctr.cfg | `check_factory_status` (RT #1478) |
+  | nrpe-host.cfg | `check_tcp_8022` |
+  | nrpe-host.cfg | `check_plugin_drift` (RT #1490) |
+
+  `check_plugin_drift` is the pointed one: the check built to catch exactly this
+  class of drift was itself untracked.
+
+  Drift was one-directional — nothing in the repo was absent from production — so
+  this is a pure catch-up. Both files now match production command-for-command
+  including arguments. The systemd units and four of the five
+  `deploy/nagios/*.cfg` service definitions were already identical.
+
+  **Not resolved here:** `deploy/nagios/registry-drift.cfg` exists in this repo as
+  a standalone file, but the running service is defined inline in the Nagios
+  server's `services/host-checks.cfg` with different `notes` text and without this
+  file's `check_interval`/`retry_interval`. Deploying the repo copy as-is would
+  define the service twice. Which representation is canonical is a decision, not a
+  sync, so it is left alone and called out rather than papered over.
+
 ### Fixed
 
 - `check_postiz_tokens.sh` sent the operator to do work Postiz does on its own,
