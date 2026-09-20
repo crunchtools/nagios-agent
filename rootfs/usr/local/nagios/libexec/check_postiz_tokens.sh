@@ -94,13 +94,17 @@ done <<< "$ROWS"
 COUNT=$(echo "$ROWS" | wc -l)
 HOWTO="reconnect at $UI via Add Channel, signing in as the same account"
 
+# Separator is " -- ", never "|": Nagios splits plugin output on the first pipe
+# and files everything after it as performance data, which would strip the
+# remedy text out of the alert and the notification mail.
+
 if [ -n "$CRIT" ]; then
-    echo "CRITICAL - Postiz:${CRIT#;}${WARN:+ | also warning:${WARN#;}} | $HOWTO"
+    echo "CRITICAL - Postiz:${CRIT#;}${WARN:+ -- also warning:${WARN#;}} -- $HOWTO"
     exit 2
 elif [ -n "$WARN" ]; then
-    echo "WARNING - Postiz:${WARN#;} | $HOWTO"
+    echo "WARNING - Postiz:${WARN#;} -- $HOWTO"
     exit 1
 else
-    echo "OK - $COUNT Postiz integrations valid, none expiring within ${WARN_DAYS}d |${MANUAL:+ manual:$MANUAL}${AUTO:+ | auto-renewing:$AUTO}"
+    echo "OK - $COUNT Postiz integrations valid, none expiring within ${WARN_DAYS}d${MANUAL:+ -- manual:$MANUAL}${AUTO:+ -- auto-renewing:$AUTO}"
     exit 0
 fi
