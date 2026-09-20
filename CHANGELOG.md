@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-20
+
+First tagged release. This agent has been running in production since
+before it had version control; this release marks the current state as
+the baseline going forward.
+
 ### Fixed
 
 - `check_container_zombies.sh` reported UNKNOWN on minimal/hardened images
@@ -46,6 +52,14 @@ All notable changes to this project are documented here. The format follows
   takes `<account-key>`, both resolving the real value host-side from
   `cloudflare-zones.conf` / `google-accounts.conf`. The repo carries only
   `.conf.example` files showing the shape.
+- Raised the `nagios-agent` container memory cap from 512m to 1g in the deployed
+  unit. `check_backup_freshness` runs 19 pCloud sentinels in waves of 7 at
+  ~70MB per rclone process, measured peak 490MB — 96% of the old cap. Any
+  concurrent check tipped the cgroup over and the kernel OOM-killed the NRPE
+  daemon: seven kills on 2026-09-19, each one a gap in the fast pool that
+  surfaced only as `connect to address 10.88.0.1 port 5666: Connection refused`
+  in the Nagios log. (Deployed-unit change; recorded here because the cap is
+  part of this agent's contract.)
 
 ### Added
 
@@ -76,17 +90,6 @@ All notable changes to this project are documented here. The format follows
 - `.specify/memory/constitution.md` — profile declaration required by
   constitution VII, previously absent.
 - `CHANGELOG.md` — this file, required by constitution II.
-
-### Fixed
-
-- Raised the `nagios-agent` container memory cap from 512m to 1g in the deployed
-  unit. `check_backup_freshness` runs 19 pCloud sentinels in waves of 7 at
-  ~70MB per rclone process, measured peak 490MB — 96% of the old cap. Any
-  concurrent check tipped the cgroup over and the kernel OOM-killed the NRPE
-  daemon: seven kills on 2026-09-19, each one a gap in the fast pool that
-  surfaced only as `connect to address 10.88.0.1 port 5666: Connection refused`
-  in the Nagios log. (Deployed-unit change; recorded here because the cap is
-  part of this agent's contract.)
 
 ### Changed
 
