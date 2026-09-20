@@ -14,76 +14,91 @@
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_cloudflare_status.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_memory.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_restart.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_running.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_cpu_stats.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_diskio.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_factory_health.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_mem.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_net_throughput.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_quay_pull_source.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_quay_staleness.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_systemd_units.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_tcp_local.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_google_oauth.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_factory_status.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 # ── Imported from lotor under RT #1490 ──────────────────────────────────────
 # The repo tracked 15 plugins; the host ran 46. The rest were edited in place
@@ -95,158 +110,207 @@ justification = "NRPE plugin; must live at the libexec path the daemon executes 
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_backup_freshness.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_cloudflare_global.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_cloudflare_proxy.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_httpd_internal.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_mariadb.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_pm2_restarts.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_postfix.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_postgres.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_process_api.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_process_count.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_temporal.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_valkey.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_vpn.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_container_zombies.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_expressvpn_dns.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_expressvpn_exit_ip.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_expressvpn.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_expressvpn_state.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_git_drift.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_hermes_probe.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_http_string_local.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_mcp_feeds_freshness.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_ping_host.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_plugin_drift.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_postiz_tokens.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_syslog_coverage.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_syslog_disk.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_syslog_freshness.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_syslog_source_freshness.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_unit_drift.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/podman_exec.sh"
 justification = "Not an NRPE plugin: the root half of the privilege split RT #1477 documented as load-bearing. check_git_drift.sh and check_unit_drift.sh run unprivileged and shell through it, so it ships beside them at the libexec path they invoke it from."
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/srv-drift-collect.sh"
 justification = "Not an NRPE plugin: runs as root via podman_exec.sh to read paths nrpe cannot (0700 certbot archive). Replaced the srv-git-drift timer RT #1477 retired; must ship at the libexec path its callers invoke it from."
+classification = "by_design"
+
+# ── New in Gourmand 1.0.0 (upstream v0.16.5) ────────────────────────────────
+# CH001-absolute_paths did not exist in v0.1.0. Both entries below are the same
+# architectural case: this repo ships a container filesystem, and the absolute
+# paths are the contract with the NRPE daemon rather than an accident.
+
+[[exceptions]]
+check = "CH001-absolute_paths"
+path = "rootfs/**"
+classification = "by_design"
+justification = "rootfs/ mirrors the container image's filesystem layout. The absolute paths ARE the contract: nrpe.cfg names the libexec paths the daemon execs, and the plugins reference the paths they are installed to. Making them relative would break every check on the host."
+
+[[exceptions]]
+check = "CH001-absolute_paths"
+path = "deploy/**"
+classification = "by_design"
+justification = "nrpe-host.cfg and nrpe-ctr.cfg define NRPE commands by absolute libexec path. The path IS the command definition -- a relative path would not resolve for the daemon."
