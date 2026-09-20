@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `check_container_zombies.sh` reported UNKNOWN on minimal/hardened images
+  (RT #1493). It execs `ps aux` inside the target via `podman_exec.sh`;
+  images with no procps (mcp-ashigaru and the rest of the Hummingbird-based
+  fleet) exit 127. Switched to the podman Engine API's
+  `/containers/{id}/top` endpoint, which runs `ps` on the host against the
+  container's PIDs via the kernel PID namespace — no binary needs to exist
+  inside the target. Verified against mcp-ashigaru (UNKNOWN → OK), a
+  nonexistent container (still UNKNOWN, with the real error), and a normal
+  container.
 - `check_quay_pull_source.sh` reported OK when it could not run (RT #1481). It
   read host units via `nsenter -t 1 -m`, which needs CAP_SYS_ADMIN and root;
   NRPE runs plugins as `nrpe`, so the nsenter always failed, and every failure
