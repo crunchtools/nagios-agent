@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `check_registry_drift.sh` went CRITICAL during deploys. It made ~170 network
+  calls serially and took **38.6s** against check_nrpe's 45s ceiling — 86% of the
+  budget — so any registry latency tipped it into
+  `CHECK_NRPE STATE CRITICAL: Socket timeout after 45 seconds`. It did exactly
+  that three times during one deploy on 2026-09-20 while the real answer was a
+  clean 56/56. That is the worst failure mode a check can have: it cries wolf
+  precisely when someone is watching, which trains everyone to ignore it.
+
+  The per-image work is now a `check_one` function that prints a single verdict
+  line, run concurrently via `xargs -P` (8 by default, `REGISTRY_DRIFT_JOBS`).
+  Tallying stays sequential in one reader, so the counting logic is unchanged.
+  Runtime **38.6s → 5.0s**, output byte-identical. Verdicts are sorted before
+  tallying, because workers finish in network order and the detail list would
+  otherwise shuffle between runs of an unchanged check.
+
+  The honesty rule is intact: unreachable git, Quay and GHCR were each exercised
+  and still produce `unknown` and the UNKNOWN exit, not a false OK.
+
 - `check_postiz_tokens.sh` sent the operator to do work Postiz does on its own,
   and did not say what that work was. It warned `threads(21d) (reconnect in the
   Postiz UI)` — naming no account, no UI path, and no reason. Threads was never
