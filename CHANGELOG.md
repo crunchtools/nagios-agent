@@ -26,11 +26,18 @@ All notable changes to this project are documented here. The format follows
 
   ```
   WARNING - Postiz: linkedin (Scott McCarty) expires in 19d and cannot auto-renew
-    | reconnect at https://postiz.crunchtools.com via Add Channel, signing in as the same account
+    -- reconnect at https://postiz.crunchtools.com via Add Channel, signing in as the same account
 
   OK - 6 Postiz integrations valid, none expiring within 21d
-    | manual: linkedin 52d | auto-renewing: threads 57d
+    -- manual: linkedin 52d -- auto-renewing: threads 57d
   ```
+
+  Sections are joined with ` -- `, never `|`. Nagios splits plugin output on the
+  first pipe and files the remainder as performance data: an earlier cut of this
+  check used `|` as a visual separator and Nagios duly parsed
+  `manual: linkedin 52d | auto-renewing: threads 57d` into `performance_data`,
+  which would have stripped the remedy text out of the alert and the notification
+  mail — removing the one thing this change exists to add.
 
   Reconnecting is "Add Channel", not clicking the channel: the in-place reconnect
   badge only renders once `refreshNeeded` is set, so it is unavailable for a
