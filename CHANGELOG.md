@@ -6,6 +6,52 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_syslog_coverage.sh` now reports MISFILED containers, and warns on them.
+
+  The check asked one question: does `<log_root>/<container_name>` exist? A
+  systemd container whose unit omits `--hostname` forwards under its podman ID,
+  so its logs land in a directory named `31094d135f31` — collected and retained,
+  findable by nobody. That looked identical to a container that is simply quiet,
+  which the check deliberately never alerts on. Two production services sat
+  misfiled for three weeks behind an `OK` (RT #1460).
+
+  It now also asks whether the container is writing under its own 12-character
+  ID, which is unambiguous, and exits WARNING with the names when it is. The
+  healthy value is always zero and the fix is a known one-line unit change, so
+  unlike `no_logs` this one is safe to page on. New perfdata: `misfiled=`.
+  Costs no extra podman call — the ID comes from the inspect the check already
+  made for the log driver.
+
+- Two CI tests for the plugins, which had none.
+
+  `all libexec scripts parse` runs `bash -n` over every plugin; a syntax error
+  previously shipped, got `chmod +x`, and announced itself as a UNKNOWN on a
+  live host. `check_syslog_coverage reports UNKNOWN with no podman socket`
+  exercises the guard path — a coverage check that cannot reach the socket must
+  say so rather than invent a clean fleet — and proves the script runs end to
+  end, which is the part CI can verify without a socket to talk to.
+
+### Changed
+
+- Both agent units bind-mount the host journal socket at `/dev/log`, and the
+  NRPE configs document why.
+
+  `log_facility=daemon` writes via `syslog(3)` to `/dev/log`. These containers
+  had no such socket, so every NRPE message — startup, listener binding, host
+  rejections — was discarded at the libc call, silently. Both agents were
+  invisible to the central collector for that reason, not because they were
+  quiet (RT #1460).
+
+  `log_file=/dev/stdout` is NOT the fix and the configs now say so: NRPE points
+  its own fd 1 and 2 at `/dev/null` before it opens the log file, so the
+  messages go to `/dev/null` and nothing reports an error. Verified on
+  nrpe-4.1.3. Entries land in the host journal under `SYSLOG_IDENTIFIER=nrpe`;
+  they carry no `CONTAINER_NAME`, so the collector files both pools together
+  under `nrpe` rather than per-container. The port in each message
+  ("Server listening on 0.0.0.0 port 5666") distinguishes them.
+
 ### Changed
 
 - `deploy/nagios-agent/nrpe-ctr.cfg` and `nrpe-host.cfg` had fallen behind the

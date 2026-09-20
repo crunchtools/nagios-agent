@@ -64,6 +64,20 @@ check "podmansock group exists at gid 1500" \
 check "nrpe is in podmansock" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "id -nG nrpe | grep -qw podmansock"
 
+# Nothing parsed these before. A plugin with a syntax error still ships, still
+# gets chmod +x, and only announces itself as a UNKNOWN on a live host.
+check "all libexec scripts parse" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'for f in /usr/local/nagios/libexec/*.sh; do bash -n "$f" || exit 1; done'
+
+# The coverage check is useless if it cannot reach the podman socket, so it must
+# say UNKNOWN rather than inventing a clean fleet. Exercising the guard also
+# proves the script runs end to end, which is the part CI can verify without a
+# socket to talk to.
+check "check_syslog_coverage reports UNKNOWN with no podman socket" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    '/usr/local/nagios/libexec/check_syslog_coverage.sh /tmp/nonexistent-log-root; [ $? -eq 3 ]'
+
 echo ""
 echo "=== Runtime tests ==="
 
