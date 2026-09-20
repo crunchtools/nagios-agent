@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `check_postiz_tokens.sh` sent the operator to do work Postiz does on its own,
+  and did not say what that work was. It warned `threads(21d) (reconnect in the
+  Postiz UI)` — naming no account, no UI path, and no reason. Threads was never
+  the problem: it stores a refresh token and Postiz renews it through a Temporal
+  `refreshTokenWorkflow` that sleeps until expiry and then extends it ~58 days.
+  The check had no way to tell that apart from LinkedIn, which stores no refresh
+  token at all and genuinely does need a human every ~60 days.
+
+  The check now reads the refresh token's presence alongside `refreshNeeded` and
+  splits channels into self-renewing and manual. Day thresholds apply only to
+  manual channels. Self-renewing ones are exempt from them but keep both hard
+  backstops: `refreshNeeded` flipping, or the token running past expiry, is still
+  CRITICAL — so a dead renewal workflow cannot hide. Alerts now name the account
+  and the exact remedy, and the OK line reports each class separately, bounded to
+  the next year so channels expiring in 2058 stay out of it.
+
+  ```
+  WARNING - Postiz: linkedin (Scott McCarty) expires in 19d and cannot auto-renew
+    | reconnect at https://postiz.crunchtools.com via Add Channel, signing in as the same account
+
+  OK - 6 Postiz integrations valid, none expiring within 21d
+    | manual: linkedin 52d | auto-renewing: threads 57d
+  ```
+
+  Reconnecting is "Add Channel", not clicking the channel: the in-place reconnect
+  badge only renders once `refreshNeeded` is set, so it is unavailable for a
+  planned re-auth. Re-running OAuth upserts on `(organizationId, internalId)`, so
+  the existing channel is updated rather than duplicated and queued posts survive.
+
 ## [1.0.0] - 2026-09-20
 
 First tagged release. This agent has been running in production since
