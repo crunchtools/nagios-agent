@@ -1,21 +1,21 @@
 #!/bin/bash
 # Check for failed systemd units on the host.
 #
-# WARNING: as of RT #1481 this check cannot actually see the host. It runs
-# inside the nagios-agent container, which has no /run/systemd and no system
-# bus socket, so systemctl either reports "Running in chroot, ignoring
-# command" (as root, exit 0, empty output) or "System has not been booted with
-# systemd as init system" (as nrpe, which is how NRPE runs it). The host had
-# 529 units at the time of writing; the container saw none of them.
+# HISTORY. Until RT #1481 this check could not see the host at all. It runs
+# inside the nagios-agent container, which had no /run/systemd and no system
+# bus socket, so systemctl reported "Running in chroot, ignoring command" (as
+# root, exit 0, empty output) or "System has not been booted with systemd as
+# init system" (as nrpe, which is how NRPE runs it). The old implementation
+# piped that straight into `grep -c "failed"`, got 0, and printed "OK - No
+# failed systemd units" unconditionally. It had never once looked at the host.
 #
-# The old implementation piped that straight into `grep -c "failed"`, got 0,
-# and printed "OK - No failed systemd units" unconditionally. It had never
-# once looked at the host. Same fail-open shape as check_quay_pull_source.sh:
-# stderr discarded, every failure mode collapsing into the success branch.
+# RT #1481 made it honest (UNKNOWN rather than a false OK). RT #1488 made it
+# work: the unit now bind-mounts /run/systemd:ro AND the host system bus
+# socket. Both are required -- /run/systemd alone still fails to connect to
+# the bus. See the comment block in the .service file for the measurements.
 #
-# This version cannot fix the visibility problem -- that needs a host bus
-# socket or an nsenter privilege split, tracked separately -- but it refuses
-# to lie about it. UNKNOWN is honest; OK was not.
+# The honesty guards below are still load-bearing. They are what turns a
+# future loss of host visibility into UNKNOWN instead of a silent green OK.
 
 set -uo pipefail
 
@@ -55,7 +55,14 @@ if [ -n "$failed_out" ]; then
     count=$(printf '%s\n' "$failed_out" | wc -l)
     # Failed units are printed with a leading bullet, but not under --plain and
     # not on every systemd version, so accept either shape.
-    units=$(printf '%s\n' "$failed_out" | awk '{ if ($1 ~ /^[●*]$/) print $2; else print $1 }' | tr '\n' ' ')
+    #
+    # Do NOT match the bullet directly: it is multibyte (U+25CF, 3 bytes) and
+    # this container runs with LANG unset / LC_CTYPE=POSIX, where gawk compares
+    # bracket expressions bytewise. `$1 ~ /^[●*]$/` therefore never matches and
+    # the alert names the bullet instead of the unit -- which is exactly what
+    # RT #1488's canary caught. Key off the dot in the unit suffix instead: a
+    # unit name always contains one, a bullet never does. Locale-proof.
+    units=$(printf '%s\n' "$failed_out" | awk '{ print ($1 ~ /\./) ? $1 : $2 }' | tr '\n' ' ')
     echo "SYSTEMD UNITS CRITICAL - ${count} failed units: ${units}| failed=${count};1;;0"
     exit $CRITICAL
 fi
