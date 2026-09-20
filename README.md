@@ -1,6 +1,6 @@
 # nagios-agent
 
-NRPE agent for the crunchtools fleet on lotor. It is the half of the monitoring
+NRPE agent for the crunchtools fleet. It is the half of the monitoring
 system that actually looks at things: the Nagios server (`crunchtools/nagios`)
 decides *when* to ask and *who* to wake, and this image answers the questions.
 It ships a UBI 10 minimal base, the NRPE daemon, and the check plugins that read
@@ -48,8 +48,8 @@ The image is not useful on its own — it needs a server to ask it questions.
 ```bash
 podman run -d --name nagios-agent.crunchtools.com \
   --network=host --pid=host --privileged --memory=1g --memory-swap=1g \
-  -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z \
-  -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z \
+  -v /srv/<service>/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z \
+  -v /srv/<service>/config/scripts:/usr/local/nagios/libexec:ro,Z \
   -v /run/podman/podman.sock:/run/podman/podman.sock \
   quay.io/crunchtools/nagios-agent:latest
 ```
@@ -63,7 +63,7 @@ check_nrpe -H 10.88.0.1 -p 5666 -c check_mem
 ## Configuration
 
 Per constitution XIV, configuration is **not** baked into the image. The
-deployed agent bind-mounts `/srv/nagios-agent.crunchtools.com/config/` over
+deployed agent bind-mounts `/srv/<service>/config/` over
 `/usr/local/nagios/libexec`, so **`/srv` is what actually runs** and the image's
 own copy of a plugin is shadowed. Edit here, deploy there.
 

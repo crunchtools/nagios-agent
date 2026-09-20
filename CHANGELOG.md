@@ -71,7 +71,7 @@ the baseline going forward.
   no dependency on the dashboard process. Staleness is the CRITICAL case.
 - `deploy/nagios-agent/` and `deploy/systemd/` — the deployed NRPE configs and
   both agent unit files, captured into git for the first time. These decide
-  whether anyone gets paged and previously existed only on lotor's filesystem.
+  whether anyone gets paged and previously existed only on the host's filesystem.
 - `deploy/nagios/backup-freshness.cfg` — likewise.
 - `check_google_oauth.sh` — brought into the repo (sanitized); it is named as a
   reference implementation by universal constitution XVI but was in no repo.

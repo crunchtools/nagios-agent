@@ -74,14 +74,14 @@ This repository is PUBLIC. Per universal constitution XVII, no credentials,
 mail addresses, usernames or account-scoped identifiers may be committed here.
 
 Check plugins take an opaque key and resolve the real value from a host config
-file under `/srv/nagios-agent.crunchtools.com/config/`, bind-mounted read-only
+file under `/srv/<service>/config/`, bind-mounted read-only
 into the agent. `check_cloudflare_status.sh <domain>` and
 `check_google_oauth.sh <account-key>` are the reference implementations. The
 repo carries only `*.conf.example` files showing the shape.
 
 ## Image Purpose
 
-NRPE agent for Nagios host-level and container-level monitoring on lotor.
+NRPE agent for Nagios host-level and container-level monitoring.
 Companion to `crunchtools/nagios` (the Nagios Core server). Carries the check
 plugins that answer `check_nrpe` requests from the server.
 
@@ -125,7 +125,7 @@ Plugins in this repo follow constitution XVI (Monitoring Checks):
 ## Runtime Configuration
 
 Per constitution XIV, the deployed plugins and `nrpe.cfg` are bind-mounted from
-`/srv/nagios-agent.crunchtools.com/config/` on the host, which shadows the
+`/srv/<service>/config/` on the host, which shadows the
 image's own `/usr/local/nagios/libexec`. The repo is the source of truth;
 `/srv` is the deploy target.
 
