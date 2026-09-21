@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-20
+
 ### Changed
 
 - `check_config_drift` moved from the host NRPE daemon to the container one,
