@@ -20,6 +20,14 @@ All notable changes to this project are documented here. The format follows
   the single best counterpart wins, so a file claimed twice is still reported
   once. `duplicate` went 6 → 11 on lotor; no new divergences.
 
+- A stray glob in `config-sources.conf` expanded against the working directory
+  before validation could reject it.
+
+  The rival list is split on commas by an unquoted expansion, which also means
+  pathname expansion. A bare `*` in that column expanded to the names in the
+  plugin's working directory — every one of which then looks like a valid repo
+  name and gets cloned. The raw field is now rejected whole before it is split.
+
 - The check could hit the host NRPE daemon's 15s `command_timeout` and come
   back as "NRPE: Command timed out" with no detail.
 

@@ -181,9 +181,15 @@ while read -r svc repo _; do
   #
   # Each name becomes a path under $WORK and an argument to git clone, so
   # anything that is not a GitHub repo name is a typo at best.
+  # Validate the RAW field before splitting it. The split below is deliberately
+  # unquoted so the commas become words, which also means pathname expansion --
+  # a bare "*" in this column would otherwise expand to the names in the
+  # working directory, every one of which then looks like a valid repo name and
+  # gets cloned. Reject the field whole, then split what is left.
+  case "$repo" in *[!A-Za-z0-9._,-]*) continue ;; esac
   bad=0
   for one in ${repo//,/ }; do
-    case "$one" in ''|*[!A-Za-z0-9._-]*|.|..) bad=1 ;; esac
+    case "$one" in ''|.|..) bad=1 ;; esac
   done
   [ "$bad" -eq 0 ] || continue
   RIVAL["$svc"]=$repo
