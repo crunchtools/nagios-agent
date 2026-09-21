@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `check_config_drift.sh` missed every rival a service has beyond the first,
+  and `config-sources.conf` now takes a comma-separated list (RT #1498).
+
+  One service directory can be claimed by more than one project repo.
+  `/srv/nagios.crunchtools.com/config/services/` is owned by the nagios repo
+  AND by this one, which keeps reference copies of its own Nagios service
+  definitions under `deploy/nagios/`. With a single-repo map, six deployed
+  files were invisible — including `config-drift.cfg`, this check's own
+  service definition. Candidates are now scored across every rival at once and
+  the single best counterpart wins, so a file claimed twice is still reported
+  once. `duplicate` went 6 → 11 on lotor; no new divergences.
+
+- A stray glob in `config-sources.conf` expanded against the working directory
+  before validation could reject it.
+
+  The rival list is split on commas by an unquoted expansion, which also means
+  pathname expansion. A bare `*` in that column expanded to the names in the
+  plugin's working directory — every one of which then looks like a valid repo
+  name and gets cloned. The raw field is now rejected whole before it is split.
+
+- The check could hit the host NRPE daemon's 15s `command_timeout` and come
+  back as "NRPE: Command timed out" with no detail.
+
+  Thirty-odd anonymous clones at 8-way ran 2s, 3s, 7s and 15s on four
+  consecutive tries — the cost is round trips, not CPU, so the variance is all
+  network. At 16-way it is a consistent 2s. `CONFIG_DRIFT_TIMEOUT` also drops
+  from 25s to 10s: a per-clone bound longer than the daemon's own timeout is
+  not a bound at all, because the daemon kills the check before the honesty
+  path that would have named the unreadable repo ever runs.
+
 ## [1.2.0] - 2026-09-20
 
 ### Added
