@@ -316,6 +316,18 @@ path = "rootfs/usr/local/nagios/libexec/config-drift-collect.sh"
 justification = "Not an NRPE plugin: the root half of the RT #1498 privilege split, run via podman_exec.sh to read the srv config tree that nrpe cannot. check_config_drift.sh invokes it by the libexec path it is installed to, so it ships beside it."
 classification = "by_design"
 
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_nightly_dump.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/srv-nightly-dump-collect.sh"
+justification = "Not an NRPE plugin: the root half of the RT #1497 privilege split, run via podman_exec.sh to read the nightly dumps nrpe cannot (postiz writes 0600). check_nightly_dump.sh invokes it by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"
+
 # ── New in Gourmand 1.0.0 (upstream v0.16.5) ────────────────────────────────
 # CH001-absolute_paths did not exist in v0.1.0. Both entries below are the same
 # architectural case: this repo ships a container filesystem, and the absolute
