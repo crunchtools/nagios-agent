@@ -313,7 +313,7 @@ classification = "by_design"
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/config-drift-collect.sh"
-justification = "Not an NRPE plugin: the root half of the RT #1498 privilege split, run via podman_exec.sh to read /var/srv, which nrpe cannot. check_config_drift.sh invokes it by absolute libexec path, so it ships beside it."
+justification = "Not an NRPE plugin: the root half of the RT #1498 privilege split, run via podman_exec.sh to read the srv config tree that nrpe cannot. check_config_drift.sh invokes it by the libexec path it is installed to, so it ships beside it."
 classification = "by_design"
 
 # ── New in Gourmand 1.0.0 (upstream v0.16.5) ────────────────────────────────
