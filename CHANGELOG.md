@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-20
+
 ### Fixed
 
 - `config-sources.conf` mapped `signal-api.crunchtools.com` to `none`, so
