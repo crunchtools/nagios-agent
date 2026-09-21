@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `config-sources.conf` mapped `signal-api.crunchtools.com` to `none`, so
+  nobody ever compared it (RT #1498).
+
+  A service's rival is not always the repo of the same name. signal-api is
+  deployed as its own service directory, but its unit is shipped by the
+  **openclaw** repo, which is what actually runs it. "No repo called
+  signal-api" was read as "no rival", and the file went unchecked — while it
+  had in fact drifted: the deployed unit joins `openclaw-pod` and runs
+  `MODE=normal`, the repo copy published a port and ran `MODE=json-rpc`.
+
+  Ask what ships the service, not what shares its name.
+
+
 ## [1.2.2] - 2026-09-20
 
 ### Fixed
