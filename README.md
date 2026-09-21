@@ -40,6 +40,13 @@ daemon is the sole witness to its own death.
 6. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_systemd_units.sh`, `check_tcp_local.sh`.
+7. **Configuration drift, three doors** — `/srv` against its own git
+   (`check_git_drift.sh`), `/etc` against its `/srv` copy
+   (`check_unit_drift.sh`), and a deployed config file against any OTHER git
+   repo that also carries it (`check_config_drift.sh`). The third exists
+   because the first two are single-repo by construction: a file with two git
+   homes looks clean from inside either one, right up until someone syncs from
+   the wrong one and production changes.
 
 ## Quick start
 

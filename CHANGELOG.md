@@ -8,6 +8,65 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `check_config_drift.sh` and `config-drift-collect.sh` — the third drift door:
+  a deployed config file that TWO git repos both claim (RT #1498).
+
+  On 2026-09-20 `proxy.crunchtools.com.conf` was tracked by
+  `fatherlinux/lotor.dc3.crunchtools.com-srv` (deployed, bind-mounted, watched)
+  and by `crunchtools/proxy` (a reference copy four vhosts behind). Syncing the
+  host file from the second one deleted the trentina, mcp-gw-personal,
+  mcp-gw-work and mcp-pcloud vhosts and left josui's gateway answering 403
+  until the backup was restored. `check_git_drift` and `check_unit_drift` both
+  read green throughout, correctly: neither can see a second repo, so from
+  inside either one nothing had drifted. The comparison nobody was making was
+  between them.
+
+  The new check makes it. `config-drift-collect.sh` runs as root in the agent
+  container — same privilege split as `srv-drift-collect.sh`, for the same
+  reason — and publishes a path-and-blob-SHA fingerprint of every tracked file
+  under `/srv/<service>/config/`. Paths and hashes cross the boundary, never
+  contents, and files that carry secrets (`.env`, keys, certs, `wp-config.php`)
+  are published with no hash at all. `check_config_drift.sh` runs unprivileged,
+  shallow-blobless-clones each project repo named in `config-sources.conf`, and
+  compares blob SHAs straight out of `git ls-tree` — so no repository content is
+  downloaded and the GitHub REST API, whose unauthenticated budget of 60 calls
+  an hour would not survive ~30 repos plus a retry, is never touched.
+
+  Four counters, four different fixes: `divergent` (a rival copy that disagrees
+  — the loaded gun), `duplicate` (a rival copy that currently matches — perfdata
+  only, an amber tile for this would become furniture), `unpublished` (deployed
+  content that `origin/master` does not hold, measured per file as a hash rather
+  than as repo state), and `secret_exposed` (Constitution XVII — a deployed
+  secret file that also lives in a project repo, where presence is the finding
+  and content is irrelevant). CRITICAL is deliberately narrow, because hermes
+  notifies on CRITICAL only: a secret in a project repo, or a file that is
+  simultaneously unpublished and contradicted by a rival, which is the
+  2026-09-20 state exactly. Everything else is WARNING.
+
+  Files under `rootfs/` in a project repo are image content, not a second home —
+  `/srv` is *supposed* to override them per Constitution XIV — and are skipped,
+  as are Containerfiles. Candidates are scored by longest common trailing path
+  suffix with a unique winner, because matching on basename alone pairs the
+  deployed `config/temporal/config.yaml` with postiz's `.gemini/config.yaml` and
+  invents drift that does not exist; a tie is reported as `ambiguous` rather
+  than guessed at.
+
+  First run on lotor: 265 deployed config files, 9 divergent across acquacotta,
+  factory, mcp-syslog, openclaw, postiz, spanish and syslog, 6 duplicates, 0
+  exposed secrets. The check ships visibly amber and the list is the work.
+  `CONFIG_DRIFT_MAX_DIVERGENT` is a ratchet for walking it down.
+
+- `rootfs/etc/nagios/config-sources.conf` — every service directory under
+  `/srv` and the project repo that could plausibly claim to own its config.
+
+  Cannot be inferred: the directory is the vhost and the repo is the project,
+  and they disagree often enough that guessing would be wrong rather than
+  merely incomplete (`mcp-feeds` → `mcp-feed-reader`, `mcp-jira` →
+  `mcp-atlassian`, `mail` → `postfix`, both gateways → one
+  `google-workspace-mcp`). `none` is an explicit answer for a service with no
+  project repo; an unlisted directory is counted as unmapped and named in the
+  headline, because silently not looking is how the outage stayed invisible.
+
 - `check_syslog_coverage.sh` now reports MISFILED containers, and warns on them.
 
   The check asked one question: does `<log_root>/<container_name>` exist? A
