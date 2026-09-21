@@ -78,6 +78,31 @@ check "check_syslog_coverage reports UNKNOWN with no podman socket" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
     '/usr/local/nagios/libexec/check_syslog_coverage.sh /tmp/nonexistent-log-root; [ $? -eq 3 ]'
 
+# RT #1498. The cross-repo drift check is useless without its source map, and
+# the map is the only part of it that lives in the image rather than in /srv.
+check "config-sources.conf ships in the image" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c "test -s /etc/nagios/config-sources.conf"
+
+# Every service directory must get an answer -- a repo name or an explicit
+# "none". A line with one field is a half-finished edit, and the check would
+# silently treat that service as unmapped rather than unowned.
+check "every config-sources.conf entry names a repo or none" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'grep -vE "^[[:space:]]*(#|$)" /etc/nagios/config-sources.conf | awk "NF != 2 { bad = 1 } END { exit bad }"'
+
+# Honesty rule: no source map means no comparison happened, which is UNKNOWN,
+# never OK. Exercising the guard also proves the plugin parses and runs end to
+# end without a podman socket to talk to.
+check "check_config_drift reports UNKNOWN with no source map" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'CONFIG_DRIFT_CONF=/tmp/nonexistent.conf /usr/local/nagios/libexec/check_config_drift.sh; [ $? -eq 3 ]'
+
+# The collector must answer with a parseable error sentinel rather than dying,
+# or the plugin reports "output truncated" and hides the real cause.
+check "config-drift-collect reports repo_not_mounted without /var/srv" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'CONFIG_DRIFT_REPO=/tmp/nonexistent /usr/local/nagios/libexec/config-drift-collect.sh | grep -q "CFGDRIFT error=repo_not_mounted"'
+
 echo ""
 echo "=== Runtime tests ==="
 
