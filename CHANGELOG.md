@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-20
+
 ### Added
 
 - `check_config_drift.sh` and `config-drift-collect.sh` — the third drift door:
