@@ -45,12 +45,24 @@
 # is Constitution XVII, whether or not the two copies agree. It reads zero
 # today and the point is to keep it there.
 #
-# WHAT IS NOT A SECOND HOME. Files under rootfs/ in a project repo are image
-# content -- the default the image bakes in, which /srv is SUPPOSED to override
-# per Constitution XIV. rt/rootfs/opt/rt6/etc/RT_SiteConfig.pm and the deployed
-# RT_SiteConfig.pm are meant to differ, and calling that drift would be noise.
-# check_plugin_drift.sh already guards image-vs-/srv where it matters.
-# Containerfiles are skipped for the same reason: a build file is not config.
+# WHAT IS NOT A SECOND HOME: image content. A file the image BAKES IN is the
+# default /srv is supposed to override per Constitution XIV, so the two are
+# meant to differ and calling that drift is noise.
+# rt/rootfs/opt/rt6/etc/RT_SiteConfig.pm and the deployed RT_SiteConfig.pm are
+# the case in point. check_plugin_drift.sh already guards image-vs-/srv where
+# it matters.
+#
+# The question is how to RECOGNISE image content, and "under rootfs/" is only
+# an approximation of it. The repo itself gives the exact answer: whatever the
+# Containerfile COPYs in. postiz keeps ecosystem.config.js at its repo root and
+# syslog keeps config/rsyslog.conf, both COPYd into the image and both
+# overridden from /srv at runtime -- exactly the rt pattern, and both reported
+# as drift until this plugin learned to read the Containerfile. So the skip set
+# is rootfs/ plus every COPY/ADD source, read from the repo. COPY --from=stage
+# is ignored: that copies out of a build stage, not out of the repo.
+#
+# Containerfiles themselves are skipped too, for a different reason: a build
+# file is not configuration.
 #
 # HOW THE MATCH IS MADE. Basename alone is too loose -- postiz ships both
 # rootfs/etc/temporal/config.yaml and .gemini/config.yaml, and matching the
@@ -213,6 +225,37 @@ done
 WORK=$(mktemp -d /tmp/config_drift.XXXXXX) || { echo "CONFIG DRIFT UNKNOWN - cannot create work directory"; exit $UNKNOWN; }
 trap 'rm -rf "$WORK"' EXIT
 
+# Every path the image bakes in, one per line, for the repo just cloned.
+# The clone is blobless, so reading the Containerfile lazily fetches exactly
+# that one blob -- a few KB per repo, and the alternative is guessing.
+# A missing or unreadable Containerfile is not a failure: a repo may not build
+# an image at all, and rootfs/ alone is still a correct answer.
+image_paths() {
+    local repo=$1 out
+    printf 'rootfs/\n'
+    out=$(timeout "$NET_TIMEOUT" git --git-dir="${WORK}/${repo}.git" show HEAD:Containerfile 2>/dev/null) || return 0
+    printf '%s\n' "$out" | awk '
+        toupper($1) != "COPY" && toupper($1) != "ADD" { next }
+        {
+            # Drop the directive, then every flag. --from= copies out of a
+            # build stage rather than out of the repo, so the whole line is
+            # someone elses content and none of our business.
+            from_stage = 0
+            n = 0
+            for (i = 2; i <= NF; i++) {
+                if ($i ~ /^--from=/) { from_stage = 1; break }
+                if ($i ~ /^--/) continue
+                args[++n] = $i
+            }
+            if (from_stage || n < 2) { n = 0; delete args; next }
+            # The last argument is the destination in the image; the rest are
+            # sources in the repo.
+            for (i = 1; i < n; i++) print args[i]
+            n = 0; delete args
+        }'
+    return 0
+}
+
 fetch_tree() {
     local repo=$1
     if timeout "$NET_TIMEOUT" git clone -q --filter=blob:none --bare --depth 1 \
@@ -220,12 +263,13 @@ fetch_tree() {
        && git --git-dir="${WORK}/${repo}.git" ls-tree -r HEAD \
             --format='%(objectname) %(path)' > "${WORK}/${repo}.tree" 2>/dev/null \
        && [ -s "${WORK}/${repo}.tree" ]; then
+        image_paths "$repo" > "${WORK}/${repo}.image" 2>/dev/null
         return 0
     fi
-    rm -f "${WORK}/${repo}.tree"
+    rm -f "${WORK}/${repo}.tree" "${WORK}/${repo}.image"
     return 1
 }
-export -f fetch_tree
+export -f fetch_tree image_paths
 export GIT_HOST ORG WORK NET_TIMEOUT
 
 if [ "${#NEEDED[@]}" -gt 0 ]; then
@@ -296,7 +340,17 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
     fi
 
     # Image content, not a second home for deployed config. See the header.
-    case "$best_path" in rootfs/*) continue ;; esac
+    # Matched as a prefix so a COPY of a directory covers everything under it,
+    # and exactly so a COPY of a single file covers just that file.
+    baked=0
+    while IFS= read -r ip; do
+        [ -n "$ip" ] || continue
+        case "$ip" in
+            */) case "$best_path" in "$ip"*) baked=1; break ;; esac ;;
+            *)  case "$best_path" in "$ip"|"$ip"/*) baked=1; break ;; esac ;;
+        esac
+    done < "${WORK}/${repo}.image"
+    [ "$baked" -eq 0 ] || continue
 
     if [ -n "${SECRET[$path]:-}" ]; then
         secret_exposed=$(( secret_exposed + 1 ))

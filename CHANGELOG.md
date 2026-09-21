@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `check_config_drift.sh` called image content a second git home whenever the
+  Containerfile `COPY`d it from somewhere other than `rootfs/` (RT #1498).
+
+  "Under `rootfs/`" was only ever an approximation of "baked into the image".
+  postiz keeps `ecosystem.config.js` at its repo root and syslog keeps
+  `config/rsyslog.conf`, both `COPY`d in and both overridden from `/srv` at
+  runtime — the same image-default/host-override pattern as
+  `rt/rootfs/opt/rt6/etc/RT_SiteConfig.pm`, which the check already knew to
+  ignore. Both were reported as divergent, and both were meant to differ.
+
+  The repo itself has the exact answer, so the plugin now reads it: the skip
+  set is `rootfs/` plus every `COPY`/`ADD` source in the Containerfile.
+  `COPY --from=stage` is ignored, because that copies out of a build stage
+  rather than out of the repo. The clone is blobless, so reading the
+  Containerfile lazily fetches that one blob — a few KB per repo, against
+  guessing. A repo with no Containerfile is not an error; `rootfs/` alone is
+  still a correct answer for it.
+
+  On lotor: divergent 9 → 7, and the 7 that remain are all real.
+
+
 ## [1.2.1] - 2026-09-20
 
 ### Fixed
