@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-20
+
 ### Fixed
 
 - `check_config_drift.sh` missed every rival a service has beyond the first,
