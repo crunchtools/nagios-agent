@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `check_config_drift` moved from the host NRPE daemon to the container one,
+  and now compares five more services (RT #1498).
+
+  It started on the host agent beside `check_git_drift` and `check_unit_drift`,
+  which is where it looks like it belongs. That was wrong. It makes ~34 shallow
+  clones per run, and against that daemon's 15s `command_timeout` five
+  consecutive runs measured 3s, 3s, 11s, 11s and 5s — it had already returned
+  `NRPE: Command timed out` once in production. Raising parallelism does not
+  help; the cost is per-clone latency, not concurrency. It belongs on the 60s
+  daemon beside `check_registry_drift`, which does the same kind of work for
+  the same reason.
+
+  Nothing is lost by moving it. The plugin never reads `/var/srv` itself — the
+  privileged half runs as root via `podman_exec.sh` inside
+  `nagios-agent.crunchtools.com`, which has the tree mounted — and both agents
+  bind-mount the same libexec directory, so the plugin is already present in
+  both.
+
+- `config-sources.conf`: five services that claimed `none` now name the repo
+  that builds the image they actually run.
+
+  `kagetora` runs `quay.io/crunchtools/hermes`; the four WordPress sites run
+  the shared `ubi10-httpd-php*` base images. None of those repos carries a copy
+  of the deployed config today, which is exactly why they are listed: "we
+  looked and found nothing" and "nobody ever looked" are the same green tile
+  until somebody adds a file. `none` now survives only where it is true —
+  `backups`, which is not a container, and `mcp-lightspeed`, which runs a Red
+  Hat image with no Crunchtools repo behind it.
+
+  What a service RUNS is the question, and its systemd unit answers it.
+
+
 ## [1.2.3] - 2026-09-20
 
 ### Fixed
