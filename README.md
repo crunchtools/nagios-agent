@@ -40,6 +40,12 @@ daemon is the sole witness to its own death.
 6. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_systemd_units.sh`, `check_tcp_local.sh`.
+7. **Backup freshness** — the weekly pCloud dumps by age and size floor
+   (`check_backup_freshness.sh`), and the nightly in-container dumps read on disk
+   under `/var/srv` before they ever reach pCloud (`check_nightly_dump.sh` +
+   `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
+   `podman_exec.sh`, the same split the drift checks use, because one service
+   writes its dump `0600`.
 7. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git

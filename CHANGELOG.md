@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-20
+
+### Added
+
+- `check_nightly_dump.sh` and `srv-nightly-dump-collect.sh` — freshness of the
+  nightly in-container database dumps, read on disk before they reach pCloud
+  (RT #1497).
+
+  Three services dump their own database nightly from a cron or timer inside
+  their own container — learn (`my_wiki.sql`, `export.xml`), rt (`rt4.sql`),
+  postiz (`postiz-*.sql.gz`) — on top of the weekly pbs dump.
+  `check_backup_freshness.sh` already watches these, but only the pCloud copies,
+  and pCloud only refreshes on the Saturday sync. So a nightly job that dies
+  mid-week is invisible for up to seven days: the dump on disk goes stale while
+  its pCloud sentinel stays green, because the weekly artifact it reads is still
+  fine. The exposure degrades to the weekly baseline, which is monitored — but
+  not to zero, and it is exactly the kind of thing that stays broken for months
+  because nothing says so.
+
+  The new check reads the dumps where they land first, under `/var/srv`, and goes
+  WARNING at 36h / CRITICAL at 50h (a missed night plus margin / two missed
+  nights), with a per-service size floor so a dump that exits 0 but writes
+  near-empty is caught too. It escalates to root via `podman_exec.sh` — the same
+  privilege split as the drift checks, and for the same reason: postiz writes its
+  dump `0600` in a `0700` dir (it plausibly holds social OAuth tokens), so nrpe
+  cannot stat it and loosening the mode is the wrong fix. The collector reports
+  only a label, mtime, size and floor per service; all policy lives in the
+  plugin. No new mount — `/var/srv` is already ro-mounted for the drift checks,
+  which retires the mount concern the ticket had flagged as the cost of this fix.
+
 ## [1.1.0] - 2026-09-20
 
 ### Added
