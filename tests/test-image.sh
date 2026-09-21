@@ -103,6 +103,19 @@ check "config-drift-collect reports repo_not_mounted without /var/srv" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
     'CONFIG_DRIFT_REPO=/tmp/nonexistent /usr/local/nagios/libexec/config-drift-collect.sh | grep -q "CFGDRIFT error=repo_not_mounted"'
 
+# RT #1497. Same honesty rule as the drift collector: no /var/srv means no
+# measurement happened, which must surface as a parseable error sentinel rather
+# than a crash the plugin would report as "output truncated".
+check "srv-nightly-dump-collect reports base_not_mounted without /var/srv" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'BASE=/tmp/nonexistent /usr/local/nagios/libexec/srv-nightly-dump-collect.sh | grep -q "NDUMP error=base_not_mounted"'
+
+# No podman socket in CI, so the collector exec fails -- which must be UNKNOWN,
+# never a false OK. Also proves the plugin parses and runs end to end.
+check "check_nightly_dump reports UNKNOWN with no podman socket" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    '/usr/local/nagios/libexec/check_nightly_dump.sh; [ $? -eq 3 ]'
+
 echo ""
 echo "=== Runtime tests ==="
 
