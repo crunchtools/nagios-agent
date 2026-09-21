@@ -60,6 +60,13 @@
 # guessed at. That rule picks rootfs/etc/temporal/config.yaml, which is then
 # correctly dropped as image content.
 #
+# ONE SERVICE CAN HAVE SEVERAL RIVALS, so config-sources.conf takes a
+# comma-separated list. /srv/nagios.crunchtools.com/config/services/ is claimed
+# by the nagios repo and by THIS one, which keeps reference copies of its own
+# Nagios service definitions under deploy/nagios/. Candidates are scored across
+# every rival at once and the single best counterpart wins, so a file claimed
+# twice is reported once.
+#
 # HOW IT READS THE RIVALS. git clone --filter=blob:none --bare --depth 1, then
 # ls-tree. Blob SHAs come out of the tree without downloading a single file, so
 # the comparison is a string compare against the collector's hashes and no
@@ -81,8 +88,20 @@ CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 CONF=${CONFIG_DRIFT_CONF:-/etc/nagios/config-sources.conf}
 ORG=${CONFIG_DRIFT_ORG:-crunchtools}
 GIT_HOST=${CONFIG_DRIFT_GIT_HOST:-https://github.com}
-NET_TIMEOUT=${CONFIG_DRIFT_TIMEOUT:-25}
-JOBS=${CONFIG_DRIFT_JOBS:-8}
+# THE TIME BUDGET, measured rather than guessed. This runs on the HOST nrpe
+# daemon, whose command_timeout is 15s (nrpe-host.cfg) -- a quarter of the 60s
+# the container daemon allows, and deliberately so. Thirty-odd anonymous clones
+# at 8-way ran 2s, 3s, 7s and 15s on four consecutive tries; the last one hit
+# the ceiling exactly and came back as "NRPE: Command timed out" with no
+# detail. At 16-way the same work is a consistent 2s, because the cost is
+# round trips and not CPU.
+#
+# NET_TIMEOUT must stay UNDER command_timeout for the same reason. A per-clone
+# bound longer than the daemon's is not a bound at all: the daemon kills the
+# check first and the honesty machinery below -- which would have named the
+# repo it could not read -- never gets to run.
+NET_TIMEOUT=${CONFIG_DRIFT_TIMEOUT:-10}
+JOBS=${CONFIG_DRIFT_JOBS:-16}
 
 # Ratchet, per the lesson in factory-status.cfg and the note at the end of
 # registry-drift.cfg: a check that is permanently amber is not honest, it is
@@ -155,9 +174,18 @@ declare -A RIVAL=()
 while read -r svc repo _; do
   case "$svc" in ''|\#*) continue ;; esac
   [ -n "${repo:-}" ] || continue
-  # The repo name becomes a path under $WORK and an argument to git clone.
-  # Anything that is not a GitHub repo name is a typo at best.
-  case "$repo" in *[!A-Za-z0-9._-]*|.|..) continue ;; esac
+  # The repo field is a comma-separated list, because one service directory can
+  # have more than one rival: everything under /srv/nagios.crunchtools.com/
+  # config/services/ is claimed by the nagios repo AND by this one, which keeps
+  # reference copies of its own Nagios service definitions in deploy/nagios/.
+  #
+  # Each name becomes a path under $WORK and an argument to git clone, so
+  # anything that is not a GitHub repo name is a typo at best.
+  bad=0
+  for one in ${repo//,/ }; do
+    case "$one" in ''|*[!A-Za-z0-9._-]*|.|..) bad=1 ;; esac
+  done
+  [ "$bad" -eq 0 ] || continue
   RIVAL["$svc"]=$repo
 done < <(grep -vE '^[[:space:]]*(#|$)' "$CONF")
 
@@ -168,7 +196,7 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
   case "${RIVAL[$svc]:-}" in
     '')     case " $unmapped " in *" $svc "*) : ;; *) unmapped="$unmapped $svc" ;; esac ;;
     none)   : ;;
-    *)      NEEDED["${RIVAL[$svc]}"]=1 ;;
+    *)      for one in ${RIVAL[$svc]//,/ }; do NEEDED["$one"]=1; done ;;
   esac
 done
 
@@ -228,26 +256,32 @@ div_list=""; sec_list=""; amb_list=""
 for path in "${!DISK[@]}" "${!SECRET[@]}"; do
     svc=${path%%/*}
     base=${path##*/}
-    repo=${RIVAL[$svc]:-}
-    [ -n "$repo" ] && [ "$repo" != none ] || continue
-    [ -s "${WORK}/${repo}.tree" ] || continue
+    repos=${RIVAL[$svc]:-}
+    [ -n "$repos" ] && [ "$repos" != none ] || continue
 
     # A build file is not configuration; /srv keeps local Containerfiles for a
     # couple of services and comparing those to the repo's would flag forever.
     case "$base" in Containerfile|Dockerfile|.containerignore) continue ;; esac
 
-    best=0; best_path=""; best_sha=""; ties=0
-    while read -r rsha rpath; do
-        [ "${rpath##*/}" = "$base" ] || continue
-        score=$(suffix_score "$path" "$rpath")
-        if [ "$score" -gt "$best" ]; then
-            best=$score; best_path=$rpath; best_sha=$rsha; ties=1
-        elif [ "$score" -eq "$best" ] && [ "$best" -gt 0 ]; then
-            ties=$(( ties + 1 ))
-        fi
-    done < "${WORK}/${repo}.tree"
+    # Scored across every rival at once, not per rival, so the winner is the
+    # single best counterpart in the org rather than one per repo -- otherwise
+    # a file claimed by two repos would be reported twice.
+    best=0; best_path=""; best_sha=""; best_repo=""; ties=0
+    for repo in ${repos//,/ }; do
+        [ -s "${WORK}/${repo}.tree" ] || continue
+        while read -r rsha rpath; do
+            [ "${rpath##*/}" = "$base" ] || continue
+            score=$(suffix_score "$path" "$rpath")
+            if [ "$score" -gt "$best" ]; then
+                best=$score; best_path=$rpath; best_sha=$rsha; best_repo=$repo; ties=1
+            elif [ "$score" -eq "$best" ] && [ "$best" -gt 0 ]; then
+                ties=$(( ties + 1 ))
+            fi
+        done < "${WORK}/${repo}.tree"
+    done
 
     [ "$best" -gt 0 ] || continue
+    repo=$best_repo
 
     if [ "$ties" -gt 1 ]; then
         ambiguous=$(( ambiguous + 1 ))
