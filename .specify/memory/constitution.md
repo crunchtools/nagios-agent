@@ -63,10 +63,9 @@ universal constitution XII. Gourmand runs from
 `quay.io/crunchtools/gourmand:latest` via the reusable workflow in
 `crunchtools/gatehouse`, never a local install.
 
-`gourmand.toml` exists solely so `gourmand-exceptions.toml` is read, and it
-carries the full default `[thresholds]` block verbatim — Gourmand silently
-zeroes every threshold when a config file exists without one. Do not tune
-those values.
+`gourmand.toml` exists solely so `gourmand-exceptions.toml` is read; it needs
+no content. Path exclusions go in `.gourmand-exceptions.d/globals.toml` or
+`.gitignore`, because Gourmand ignores `excluded_paths` in `gourmand.toml`.
 
 ## Secrets and Identifiable Data
 
