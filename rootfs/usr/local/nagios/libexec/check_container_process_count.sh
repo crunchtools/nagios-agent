@@ -28,7 +28,7 @@ fi
 
 SOCK="/run/podman/podman.sock"
 
-RAW=$(curl -s --unix-socket "$SOCK" \
+RAW=$(curl -s --max-time 10 --unix-socket "$SOCK" \
     "http://localhost/v5.0.0/containers/${CONTAINER}/top?ps_args=-eo%20pid%2Cargs" 2>&1)
 RC=$?
 
@@ -45,15 +45,18 @@ if ! printf '%s' "$RAW" | grep -q '"Titles"'; then
     exit 3
 fi
 
-PROC_ROWS=$(printf '%s' "$RAW" | grep -oP '"Processes":\[\K.*(?=\],"Titles")' | grep -oP '\[[^]]*\]')
+# Each row is ["<pid>","<args>"]. Match JSON strings properly (escaped
+# quotes and backslashes) so a `]` or `","` inside a command line cannot end
+# the row early. -o with \K keeps only the args column.
+JSON_STR='"(?:[^"\\]|\\.)*"'
+ARGS=$(printf '%s' "${RAW%%\"Titles\"*}" | grep -oP "\[${JSON_STR},\K${JSON_STR}(?=\])")
 
-if [ -z "$PROC_ROWS" ]; then
+if [ -z "$ARGS" ]; then
     echo "UNKNOWN - $LABEL in $CONTAINER: podman top returned no process rows"
     exit 3
 fi
 
-# Each row is ["<pid>","<args>"]; keep only the args column.
-COUNT=$(printf '%s\n' "$PROC_ROWS" | sed -E 's/^\["[^"]*","(.*)"\]$/\1/' | grep -cE -- "$PATTERN")
+COUNT=$(printf '%s\n' "$ARGS" | sed -E 's/^"(.*)"$/\1/' | grep -cE -- "$PATTERN")
 
 PERFDATA="process_count=${COUNT};${MIN_WARN}:;${MIN_CRIT}:;0;"
 

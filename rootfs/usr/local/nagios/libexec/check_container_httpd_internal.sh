@@ -22,7 +22,18 @@ if [ -z "$CONTAINER" ]; then
     exit 3
 fi
 
-IP=$(curl -s --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${CONTAINER}/json" 2>/dev/null \
+# PORT and PATH go into a URL fetched from the host network; keep them from
+# rewriting the authority (e.g. PORT="80@elsewhere").
+if ! [[ "$PORT" =~ ^[0-9]{1,5}$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo "UNKNOWN - invalid port '$PORT'"
+    exit 3
+fi
+if [[ "$PATH_URL" != /* ]] || [[ "$PATH_URL" == *@* ]]; then
+    echo "UNKNOWN - invalid path '$PATH_URL'"
+    exit 3
+fi
+
+IP=$(curl -s --max-time 5 --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${CONTAINER}/json" 2>/dev/null \
     | grep -oP '"IPAddress"\s*:\s*"\K[0-9.]+' | head -1)
 
 RESULT=""
