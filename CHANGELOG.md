@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `check_container_process_count` and `check_container_httpd_internal` no
+  longer open a Podman exec session on every run (RT #1513). Each API exec
+  keeps two conmon processes on the host for `exit_command_delay` (300s)
+  after it finishes. With checks every minute that came to ~500 standing
+  processes on lotor, about half of what `check_procs_total` counted.
+  Process counts now come from the `/top` endpoint (the same approach as
+  `check_container_zombies`), and a missing container reports UNKNOWN
+  instead of a silent 0. HTTP checks curl the container's bridge IP
+  directly and fall back to exec only for host-network containers or
+  loopback-only ports.
+
+### Added
+
+- `tests/test-plugins.sh`: offline tests for those two plugins with curl and
+  `podman_exec.sh` stubbed. They cover parsing, error paths, the exec fallback
+  rules and input validation. `test-image.sh` runs them in CI.
+
 ## [1.3.0] - 2026-09-20
 
 ### Changed

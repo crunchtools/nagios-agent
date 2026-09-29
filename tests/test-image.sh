@@ -131,6 +131,11 @@ check "port 5666 listening" \
 
 $RUNTIME stop nrpe-test >/dev/null 2>&1 || true
 
+echo "=== Plugin tests (offline, stubbed) ==="
+
+check "exec-free container plugins" \
+    "$(dirname "$0")/test-plugins.sh"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
