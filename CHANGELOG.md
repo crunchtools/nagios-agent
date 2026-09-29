@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `check_procs_total` on lotor tightened from 1100/1300 to 900/1100. The
+  baseline fell from ~1,050 to ~600 once exec conmons stopped lingering
+  (RT #1513), so the old thresholds hid a 500-process leak.
+
 ## [1.3.1] - 2026-09-29
 
 ### Changed
