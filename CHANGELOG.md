@@ -6,7 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-29
+
 ### Changed
+
+- `check_cloudflare_global` counts only the Cloudflare products we use
+  (authoritative DNS, CDN/cache, SSL provisioning, WAF, rules, challenges,
+  API, dashboard). `Network` is dropped: a regional APAC degradation raised a
+  WARNING against zones it never touched. Unused products (Recursive DNS,
+  Secondary DNS, Registrar, Always Online) and the non-existent `Zones` are
+  gone too.
+- `config-sources.conf` maps the Matrix bridge and Conduit services and
+  `trentina-demo`, so config drift no longer reports them UNMAPPED.
+- `deploy/nagios-agent/nrpe-ctr.cfg` catches up with the deployed copy
+  (bridge, Conduit and weston checks).
 
 - `check_container_process_count` and `check_container_httpd_internal` no
   longer open a Podman exec session on every run (RT #1513). Each API exec

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Offline tests for the exec-free container plugins (RT #1513). curl and
+# Offline tests for the exec-free container plugins (RT #1513) and the
+# Cloudflare component filter. curl and
 # podman_exec.sh are stubbed, so this runs anywhere with bash and GNU grep -P,
 # no Podman socket needed.
 set -uo pipefail
@@ -78,6 +79,29 @@ expect "port with @ rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr '80@1
 expect "port out of range rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr 70000 /
 expect "path without leading / rejected" 3 "UNKNOWN - invalid path" no -- "$HTTP" ctr 80 '@evil/'
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" no -- "$HTTP" '../../containers/json#' 80 /
+
+echo "=== check_cloudflare_global ==="
+CF="$LIBEXEC/check_cloudflare_global.sh"
+cf_incident() {  # <name> <impact> <component>...
+    local name="$1" impact="$2" comps="" c; shift 2
+    for c in "$@"; do comps="${comps:+$comps,}{\"id\":\"x\",\"name\":\"$c\",\"status\":\"degraded_performance\"}"; done
+    printf '{"id":"i","name":"%s","status":"investigating","impact":"%s","components":[%s]}' "$name" "$impact" "$comps"
+}
+if command -v gawk >/dev/null; then
+    APAC=$(cf_incident "Network Performance Degradation - Asia-Pacific" minor "Network")
+    WARP=$(cf_incident "Incorrect geo location for some WARP users" minor "WARP")
+    CDN=$(cf_incident "Elevated cache errors" minor "CDN/Cache" "Network")
+    DNS=$(cf_incident "Authoritative DNS failures" major "Authoritative DNS")
+    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$APAC,$WARP]}" \
+        expect "regional Network and WARP stay OK" 0 "^OK .*2 unrelated" no -- "$CF"
+    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$WARP,$CDN]}" \
+        expect "minor CDN/Cache is WARNING" 1 "^WARNING .*Elevated cache errors.*CDN/Cache" no -- "$CF"
+    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$DNS]}" \
+        expect "major Authoritative DNS is CRITICAL" 2 "^CRITICAL .*Authoritative DNS failures" no -- "$CF"
+    STUB_DIRECT='' expect "no response is UNKNOWN" 3 "^UNKNOWN" no -- "$CF"
+else
+    echo "SKIP: gawk not installed"
+fi
 
 echo
 echo "Results: $PASS passed, $FAIL failed"
