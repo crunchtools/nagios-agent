@@ -2,6 +2,18 @@
 # Check process count inside a container matches expectations
 # Useful for Node.js worker pools, PHP-FPM pools, Nginx workers
 # Usage: check_container_process_count.sh <container> <pattern> <min_warn> <min_crit> [label]
+#
+# NO EXEC. The old body ran `podman_exec.sh <ctr> pgrep -c -f <pattern>`.
+# Every API exec session keeps two conmon processes alive on the host for
+# exit_command_delay (300s by default) after the command finishes. At a
+# 1-minute check interval across the fleet that was ~500 standing processes
+# on lotor -- the monitoring was most of what "Host total processes" counted.
+#
+# Same approach as check_container_zombies.sh (RT #1493): the Engine API's
+# /containers/{id}/top runs ps on the HOST against the container's PID
+# namespace, so nothing needs to exist inside the target and no exec session
+# is created. `args` is the full command line, which is what pgrep -f
+# matched against; the pattern is still an extended regex.
 
 CONTAINER="$1"
 PATTERN="$2"
@@ -14,12 +26,34 @@ if [ -z "$CONTAINER" ] || [ -z "$PATTERN" ]; then
     exit 3
 fi
 
-COUNT=$(/usr/local/nagios/libexec/podman_exec.sh "$CONTAINER" pgrep -c -f "$PATTERN" 2>/dev/null)
+SOCK="/run/podman/podman.sock"
+
+RAW=$(curl -s --unix-socket "$SOCK" \
+    "http://localhost/v5.0.0/containers/${CONTAINER}/top?ps_args=-eo%20pid%2Cargs" 2>&1)
 RC=$?
 
-if [ $RC -ne 0 ] || [ -z "$COUNT" ]; then
-    COUNT=0
+if [ "$RC" -ne 0 ]; then
+    echo "UNKNOWN - $LABEL in $CONTAINER: podman top request failed (curl exit ${RC})"
+    exit 3
 fi
+
+# Positive proof we got a process table. A stopped or renamed container
+# returns {"cause":...,"message":...}, which must not read as zero processes.
+if ! printf '%s' "$RAW" | grep -q '"Titles"'; then
+    ERRMSG=$(printf '%s' "$RAW" | grep -oP '"message"\s*:\s*"\K[^"]+')
+    echo "UNKNOWN - $LABEL in $CONTAINER: podman top failed${ERRMSG:+: $ERRMSG}"
+    exit 3
+fi
+
+PROC_ROWS=$(printf '%s' "$RAW" | grep -oP '"Processes":\[\K.*(?=\],"Titles")' | grep -oP '\[[^]]*\]')
+
+if [ -z "$PROC_ROWS" ]; then
+    echo "UNKNOWN - $LABEL in $CONTAINER: podman top returned no process rows"
+    exit 3
+fi
+
+# Each row is ["<pid>","<args>"]; keep only the args column.
+COUNT=$(printf '%s\n' "$PROC_ROWS" | sed -E 's/^\["[^"]*","(.*)"\]$/\1/' | grep -cE -- "$PATTERN")
 
 PERFDATA="process_count=${COUNT};${MIN_WARN}:;${MIN_CRIT}:;0;"
 
