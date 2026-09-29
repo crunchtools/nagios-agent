@@ -2,6 +2,8 @@
 # Check Apache/Nginx/Caddy HTTP response inside a container
 # Tests the actual web server, not just the process
 # Usage: check_container_httpd_internal.sh <container> [port] [path] [expected_codes]
+#   port: 1-65535 (default 80). path: must start with / and contain no @
+#   (default /). Invalid port or path returns UNKNOWN.
 #
 # DIRECT FIRST, EXEC AS FALLBACK. The agent runs with --network=host, so a
 # bridged container's IP is reachable from here without an exec session.

@@ -28,12 +28,12 @@ fi
 
 SOCK="/run/podman/podman.sock"
 
-RAW=$(curl -s --max-time 10 --unix-socket "$SOCK" \
+RAW=$(curl -sS --max-time 10 --unix-socket "$SOCK" \
     "http://localhost/v5.0.0/containers/${CONTAINER}/top?ps_args=-eo%20pid%2Cargs" 2>&1)
 RC=$?
 
 if [ "$RC" -ne 0 ]; then
-    echo "UNKNOWN - $LABEL in $CONTAINER: podman top request failed (curl exit ${RC})"
+    echo "UNKNOWN - $LABEL in $CONTAINER: podman top request failed (curl exit ${RC}): ${RAW}"
     exit 3
 fi
 
@@ -56,7 +56,7 @@ if [ -z "$ARGS" ]; then
     exit 3
 fi
 
-COUNT=$(printf '%s\n' "$ARGS" | sed -E 's/^"(.*)"$/\1/' | grep -cE -- "$PATTERN")
+COUNT=$(printf '%s\n' "$ARGS" | sed -E 's/^"(.*)"$/\1/; s/\\"/"/g; s/\\\\/\\/g' | grep -cE -- "$PATTERN")
 
 PERFDATA="process_count=${COUNT};${MIN_WARN}:;${MIN_CRIT}:;0;"
 
