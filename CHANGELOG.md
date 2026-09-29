@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows
   directly and fall back to exec only for host-network containers or
   loopback-only ports.
 
+### Added
+
+- `tests/test-plugins.sh`: offline tests for those two plugins with curl and
+  `podman_exec.sh` stubbed. They cover parsing, error paths, the exec fallback
+  rules and input validation. `test-image.sh` runs them in CI.
+
 ## [1.3.0] - 2026-09-20
 
 ### Changed

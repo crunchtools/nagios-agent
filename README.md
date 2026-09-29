@@ -123,6 +123,7 @@ Constitution XVI governs these; the short version:
 ```bash
 podman build -t nagios-agent:test -f Containerfile .
 RUNTIME=podman IMAGE=nagios-agent:test ./tests/test-image.sh
+./tests/test-plugins.sh   # offline plugin tests, no image or socket needed
 podman run --rm -v "$PWD":/src:rw,Z -w /src quay.io/crunchtools/gourmand:latest --full .
 ```
 

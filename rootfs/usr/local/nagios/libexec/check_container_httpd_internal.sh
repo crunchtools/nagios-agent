@@ -18,6 +18,7 @@ PORT="${2:-80}"
 PATH_URL="${3:-/}"
 EXPECTED="${4:-200,301,302,401}"
 SOCK="/run/podman/podman.sock"
+PODMAN_EXEC="${PODMAN_EXEC:-/usr/local/nagios/libexec/podman_exec.sh}"
 
 if [ -z "$CONTAINER" ]; then
     echo "UNKNOWN - Usage: $0 <container> [port] [path] [expected_codes]"
@@ -54,7 +55,7 @@ if [ -n "$IP" ]; then
 fi
 
 if [ "$DIRECT_RC" -eq 7 ]; then
-    RESULT=$(/usr/local/nagios/libexec/podman_exec.sh "$CONTAINER" curl -s -o /dev/null -w '%{http_code} %{time_total}' \
+    RESULT=$("$PODMAN_EXEC" "$CONTAINER" curl -s -o /dev/null -w '%{http_code} %{time_total}' \
         --connect-timeout 5 --max-time 10 "http://127.0.0.1:${PORT}${PATH_URL}" 2>&1)
     RC=$?
     if [ $RC -ne 0 ] || [ -z "$RESULT" ]; then
