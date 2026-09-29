@@ -26,6 +26,11 @@ if [ -z "$CONTAINER" ] || [ -z "$PATTERN" ]; then
     exit 3
 fi
 
+if ! [[ "$CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "UNKNOWN - invalid container name '$CONTAINER'"
+    exit 3
+fi
+
 SOCK="/run/podman/podman.sock"
 
 RAW=$(curl -sS --max-time 10 --unix-socket "$SOCK" \

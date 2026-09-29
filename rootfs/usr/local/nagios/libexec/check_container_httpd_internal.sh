@@ -11,7 +11,7 @@
 # exit_command_delay after it finishes; at a 1-minute interval these checks
 # alone held ~100 standing processes on lotor. Exec is still used when the
 # container has no bridge IP (host network) or the port only listens on the
-# container's loopback (direct connect returns 000, e.g. acquacotta:5000).
+# container's loopback (connection refused, e.g. acquacotta:5000).
 
 CONTAINER="$1"
 PORT="${2:-80}"
@@ -24,8 +24,12 @@ if [ -z "$CONTAINER" ]; then
     exit 3
 fi
 
-# PORT and PATH go into a URL fetched from the host network; keep them from
-# rewriting the authority (e.g. PORT="80@elsewhere").
+# CONTAINER goes into a Podman API path, PORT and PATH into a URL fetched
+# from the host network; keep them from rewriting either (e.g. "80@elsewhere").
+if ! [[ "$CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "UNKNOWN - invalid container name '$CONTAINER'"
+    exit 3
+fi
 if ! [[ "$PORT" =~ ^[0-9]{1,5}$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     echo "UNKNOWN - invalid port '$PORT'"
     exit 3
@@ -38,13 +42,18 @@ fi
 IP=$(curl -s --max-time 5 --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${CONTAINER}/json" 2>/dev/null \
     | grep -oP '"IPAddress"\s*:\s*"\K[0-9.]+' | head -1)
 
+# Only a refused connection (curl exit 7: nothing listening on the bridge
+# IP, i.e. a loopback-only port) earns the exec fallback. A timeout is a
+# real answer; retrying it through exec would just double the wall time.
 RESULT=""
+DIRECT_RC=7
 if [ -n "$IP" ]; then
     RESULT=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' \
         --connect-timeout 5 --max-time 10 "http://${IP}:${PORT}${PATH_URL}" 2>/dev/null)
+    DIRECT_RC=$?
 fi
 
-if [ -z "$RESULT" ] || [ "${RESULT%% *}" = "000" ]; then
+if [ "$DIRECT_RC" -eq 7 ]; then
     RESULT=$(/usr/local/nagios/libexec/podman_exec.sh "$CONTAINER" curl -s -o /dev/null -w '%{http_code} %{time_total}' \
         --connect-timeout 5 --max-time 10 "http://127.0.0.1:${PORT}${PATH_URL}" 2>&1)
     RC=$?
@@ -61,7 +70,7 @@ if echo ",$EXPECTED," | grep -q ",$CODE,"; then
     echo "OK - HTTP in $CONTAINER: ${CODE} on port ${PORT} (${TIME}s) | response_time=${TIME}s;;;0; http_code=${CODE};;;0;"
     exit 0
 elif [ "$CODE" = "000" ]; then
-    echo "CRITICAL - HTTP in $CONTAINER port $PORT: connection refused"
+    echo "CRITICAL - HTTP in $CONTAINER port $PORT: no HTTP response (refused or timed out)"
     exit 2
 else
     echo "CRITICAL - HTTP in $CONTAINER port $PORT: unexpected ${CODE} | response_time=${TIME}s;;;0; http_code=${CODE};;;0;"
