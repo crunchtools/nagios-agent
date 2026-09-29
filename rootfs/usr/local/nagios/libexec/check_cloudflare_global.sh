@@ -16,26 +16,26 @@
 #
 # Exit: 0 OK / 1 WARNING (relevant, minor) / 2 CRITICAL (relevant, major+) / 3 UNKNOWN
 
-# Components crunchtools actually depends on: proxied DNS + CDN for four zones,
-# SSL provisioning, and the API/dashboard used by the cloudflare MCP server.
+# Only the Cloudflare products crunchtools actually uses (checked against the
+# account 2026-09-29): four Free-plan zones, proxied, Cloudflare-authoritative
+# DNS, custom WAF rules with managed challenges, page rules, cache purge, and
+# the API/dashboard behind mcp-cloudflare. Not used, so not listed: Recursive
+# DNS (lotor resolves via Linode), Secondary DNS, Registrar, Always Online.
+# "Network" is deliberately absent: it is tagged on every regional latency
+# blip (an APAC degradation paged us on 2026-09-29), and an outage that
+# actually reaches our zones also names CDN/Cache or Authoritative DNS.
+# Names must match cloudflarestatus.com components exactly (case-insensitive).
 RELEVANT_COMPONENTS="
-CDN/Cache
-CDN Cache Purge
 Authoritative DNS
 DNS Updates
-DNS Root Servers
-Recursive DNS
-Secondary DNS
-Network
-API
-Dashboard
+CDN/Cache
+CDN Cache Purge
+SSL Certificate Provisioning
 Firewall
 Rules
-Zones
-SSL Certificate Provisioning
-Registrar
-Always Online
 Challenge Platform
+API
+Dashboard
 "
 
 API_INCIDENTS='https://www.cloudflarestatus.com/api/v2/incidents/unresolved.json'

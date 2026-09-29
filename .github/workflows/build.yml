@@ -81,6 +81,7 @@ jobs:
       - name: Run tests
         run: |
           chmod +x tests/test-image.sh
+          command -v gawk >/dev/null || sudo apt-get install -y gawk
           RUNTIME=docker IMAGE=nagios-agent:test ./tests/test-image.sh
 
       - name: Build and push
