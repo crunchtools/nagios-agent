@@ -87,7 +87,10 @@ cf_incident() {  # <name> <impact> <component>...
     for c in "$@"; do comps="${comps:+$comps,}{\"id\":\"x\",\"name\":\"$c\",\"status\":\"degraded_performance\"}"; done
     printf '{"id":"i","name":"%s","status":"investigating","impact":"%s","components":[%s]}' "$name" "$impact" "$comps"
 }
-if command -v gawk >/dev/null; then
+if ! command -v gawk >/dev/null; then
+    echo "  FAIL: gawk is required (check_cloudflare_global parses JSON with it)"
+    FAIL=$((FAIL + 1))
+else
     APAC=$(cf_incident "Network Performance Degradation - Asia-Pacific" minor "Network")
     WARP=$(cf_incident "Incorrect geo location for some WARP users" minor "WARP")
     CDN=$(cf_incident "Elevated cache errors" minor "CDN/Cache" "Network")
@@ -106,8 +109,6 @@ if command -v gawk >/dev/null; then
         STUB_DIRECT="{\"incidents\":[$(cf_incident "Test incident" minor "$COMP")]}" \
             expect "listed component alerts: $COMP" 1 "^WARNING .*$COMP" no -- "$CF"
     done < <(sed -n '/^RELEVANT_COMPONENTS="/,/^"/p' "$CF" | sed '1d;$d')
-else
-    echo "SKIP: gawk not installed"
 fi
 
 echo
