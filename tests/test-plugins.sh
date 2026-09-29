@@ -99,6 +99,13 @@ if command -v gawk >/dev/null; then
     STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$DNS]}" \
         expect "major Authoritative DNS is CRITICAL" 2 "^CRITICAL .*Authoritative DNS failures" no -- "$CF"
     STUB_DIRECT='' expect "no response is UNKNOWN" 3 "^UNKNOWN" no -- "$CF"
+    # Every listed component must raise an alert on its own. Names were checked
+    # against cloudflarestatus.com/api/v2/components.json when the list was set.
+    while IFS= read -r COMP; do
+        [ -n "$COMP" ] || continue
+        STUB_DIRECT="{\"incidents\":[$(cf_incident "Test incident" minor "$COMP")]}" \
+            expect "listed component alerts: $COMP" 1 "^WARNING .*$COMP" no -- "$CF"
+    done < <(sed -n '/^RELEVANT_COMPONENTS="/,/^"/p' "$CF" | sed '1d;$d')
 else
     echo "SKIP: gawk not installed"
 fi
