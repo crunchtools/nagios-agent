@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_tig_freshness`: age of the newest Telegraf point in InfluxDB, asked
+  over the Podman exec socket. NRPE commands for the four TIG containers and
+  their ports (`crunchtools/tig`, RT #1461).
+
 ### Changed
 
 - `check_procs_total` on lotor tightened from 1100/1300 to 900/1100. The
