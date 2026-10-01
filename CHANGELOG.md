@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-01
+
+### Fixed
+
+- `check_config_drift.sh` no longer treats a file under `docs/`, `tests/` or
+  `examples/` in a project repo as a second home for deployed config. A demo
+  fixture named like a production file (`docs/demo/profiles.yaml`) was
+  reported as divergent. Reference copies under `deploy/` are still compared.
+
 ## [2.0.0] - 2026-10-01
 
 ### Changed

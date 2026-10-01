@@ -64,6 +64,14 @@
 # Containerfiles themselves are skipped too, for a different reason: a build
 # file is not configuration.
 #
+# Neither is anything under docs/, tests/ or examples/. Those trees hold
+# illustrations, fixtures and placeholders, which are written to differ from
+# production and which nobody deploys from. mcp-trentina's
+# docs/demo/profiles.yaml, a three-profile demo fixture, matched the deployed
+# gateway profiles.yaml by name and turned the check amber the hour it was
+# committed. A repo that keeps a real reference copy keeps it under deploy/,
+# which is still compared.
+#
 # HOW THE MATCH IS MADE. Basename alone is too loose -- postiz ships both
 # rootfs/etc/temporal/config.yaml and .gemini/config.yaml, and matching the
 # deployed config/temporal/config.yaml against the wrong one invents drift that
@@ -321,6 +329,8 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
         [ -s "${WORK}/${repo}.tree" ] || continue
         while read -r rsha rpath; do
             [ "${rpath##*/}" = "$base" ] || continue
+            # Documentation, fixtures and examples. See the header.
+            case "$rpath" in docs/*|tests/*|examples/*) continue ;; esac
             score=$(suffix_score "$path" "$rpath")
             if [ "$score" -gt "$best" ]; then
                 best=$score; best_path=$rpath; best_sha=$rsha; best_repo=$repo; ties=1
