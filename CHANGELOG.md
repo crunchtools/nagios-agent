@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-01
+
+### Fixed
+
+- `podman_exec.sh` parses the exec stream's frame headers instead of
+  filtering for printable characters. A header's length bytes are often
+  printable: 2,609 bytes of output came back as 2,611, with a newline and a
+  `1` in front. Every plugin that reads another container's output through
+  this helper was exposed whenever the size landed on printable bytes.
+- `podman_exec.sh` exits 3 when the API returns no exit code. It used to
+  exit 0, so a failed exec looked like a command that printed nothing.
+
 ### Added
 
 - `check_tig_freshness`: age of the newest Telegraf point in InfluxDB, asked
