@@ -111,6 +111,63 @@ else
     done < <(sed -n '/^RELEVANT_COMPONENTS="/,/^"/p' "$CF" | sed '1d;$d')
 fi
 
+echo "=== podman_exec (exec stream decoding) ==="
+# A second curl stub that plays the three Podman API calls: create returns an
+# exec id, start writes $STUB_FRAMES to the -o file, inspect returns
+# $STUB_INSPECT. Frames are built with printf so the header bytes are exact.
+XSTUBS="$(mktemp -d)"
+cat > "$XSTUBS/curl" <<'STUB'
+#!/bin/bash
+out="" url=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift ;;
+        http://*) url="$1" ;;
+    esac
+    shift
+done
+case "$url" in
+    */start) cat "$STUB_FRAMES" > "$out" ;;
+    */exec/*/json) printf '%s' "$STUB_INSPECT" ;;
+    */exec) printf '%s' "${STUB_CREATE-{\"Id\":\"abc123\"\}}" ;;
+esac
+STUB
+chmod +x "$XSTUBS/curl"
+PX="$LIBEXEC/podman_exec.sh"
+FRAMES="$XSTUBS/frames"
+
+# frame <stream-id> <payload-file>: header (id, 3 zero bytes, big-endian length) + payload
+frame() {
+    local size; size=$(stat -c %s "$2")
+    printf "$(printf '\\%03o\\000\\000\\000\\%03o\\%03o\\%03o\\%03o' "$1" \
+        $((size >> 24 & 255)) $((size >> 16 & 255)) $((size >> 8 & 255)) $((size & 255)))"
+    cat "$2"
+}
+px() { PATH="$XSTUBS:$PATH" STUB_FRAMES="$FRAMES" "$PX" "$@"; }
+
+# 2609 bytes: the length field is 0x0A31, a newline and "1". The old printable
+# filter left both in front of the output.
+head -c 2609 /dev/zero | tr '\0' x > "$XSTUBS/big"
+frame 1 "$XSTUBS/big" > "$FRAMES"
+OUT=$(STUB_INSPECT='{"ExitCode":0}' px ctr true); RC=$?
+if [ "$RC" = 0 ] && [ "${#OUT}" = 2609 ] && [ -z "$(printf '%s' "$OUT" | tr -d x)" ]; then
+    echo "  PASS: printable length bytes do not leak into output"; PASS=$((PASS + 1))
+else
+    echo "  FAIL: printable length bytes leak (rc=$RC len=${#OUT})"; FAIL=$((FAIL + 1))
+fi
+
+printf 'Threads_conn' > "$XSTUBS/a"; printf 'ected\t7\n' > "$XSTUBS/b"; printf 'warn\n' > "$XSTUBS/e"
+{ frame 1 "$XSTUBS/a"; frame 1 "$XSTUBS/b"; frame 2 "$XSTUBS/e"; } > "$FRAMES"
+STUB_INSPECT='{"ExitCode":0}' expect "line split across frames is rejoined, stderr kept" 0 $'^Threads_connected\t7\nwarn$' any -- px ctr true
+
+frame 1 "$XSTUBS/a" > "$FRAMES"
+STUB_INSPECT='{"ExitCode":7}' expect "command exit code is passed through" 7 "Threads_conn" any -- px ctr true
+STUB_INSPECT='' expect "missing exit code is an error, not 0" 3 "EXEC_ERROR: no exit code" any -- px ctr true
+: > "$FRAMES"
+STUB_INSPECT='{"ExitCode":0}' expect "empty stream gives empty output" 0 "^$" any -- px ctr true
+STUB_CREATE='{"cause":"no such container"}' STUB_INSPECT='' expect "exec that cannot be created exits 3" 3 "EXEC_ERROR: Cannot create exec" any -- px ctr true
+rm -rf "$XSTUBS"
+
 echo
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
