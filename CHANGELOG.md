@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
 - `check_tig_freshness`: age of the newest Telegraf point in InfluxDB, asked
   over the Podman exec socket. NRPE commands for the four TIG containers and
   their ports (`crunchtools/tig`, RT #1461).
+- `config-sources.conf` maps the four TIG service directories to
+  `crunchtools/tig` and adds it as a rival for the Nagios service definitions;
+  `registry-images.conf` lists the `tig` image.
 
 ### Changed
 
