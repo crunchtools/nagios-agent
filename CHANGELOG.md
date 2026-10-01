@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-01
+
+### Changed
+
+- **Breaking:** `check_mcp_feeds_freshness.sh` takes its thresholds in hours,
+  not days, and defaults to WARN 6 / CRIT 24 (was 8 / 10 days). The feed crawl
+  now runs hourly from a timer on the deploy host and the daily briefing
+  depends on it; against that, a day-scale threshold let a four-day crawl
+  outage pass without a warning. A caller still passing day values gets
+  hour thresholds. `deploy/nagios-agent/nrpe-ctr.cfg` passes `6 24`.
+
 ## [1.4.0] - 2026-10-01
 
 ### Fixed

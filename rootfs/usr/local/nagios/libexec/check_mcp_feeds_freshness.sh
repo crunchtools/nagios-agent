@@ -1,19 +1,27 @@
 #!/bin/bash
 # Check mcp-feeds (RSS/Atom feed reader) refresh freshness.
 #
-# RT #1470: nothing drives mcp-feeds refreshes on a schedule -- the only
-# regular trigger is the weekly weekend-report's defensive refresh
-# (Sat 09:00 ET). This check reads the fleet-wide newest `last_fetched`
-# timestamp straight out of the feed reader's own sqlite db over the podman
-# exec socket (same pattern as check_postiz_tokens.sh / check_google_oauth.sh)
-# -- no MCP layer, no LLM, no credential. Thresholds are days, not hours,
-# because the primary refresh path is weekly by design; see
-# crunchtools/constitution "Monitoring Checks".
+# RT #1470. This check reads the fleet-wide newest `last_fetched` timestamp
+# straight out of the feed reader's own sqlite db over the podman exec socket
+# (same pattern as check_postiz_tokens.sh / check_google_oauth.sh) -- no MCP
+# layer, no LLM, no credential.
 #
-# Usage: check_mcp_feeds_freshness.sh [warn_days] [crit_days]
+# Thresholds are HOURS. They used to be days (8/10), set when the only regular
+# trigger was the weekly weekend-report refresh. Since 2026-09-30 the crawl runs
+# hourly plus once at 05:45 from mcp-feeds-refresh.timer on lotor (Scott's call:
+# the timer stays), and the 06:00 daily briefing depends on it. A day-scale
+# threshold is useless against that: the 2026-09-26 crawl outage ran four days
+# and never tripped an 8-day WARN, while the briefing shipped with no news.
+#
+# The remediation still lives in Hermes, not here: the "mcp-feeds Refresh
+# Watchdog" cron job reacts to this service going non-OK. See crunchtools/
+# constitution "Monitoring Checks" -- that rule governs monitoring schedulers,
+# which is why the remediation is a Hermes job and not a second timer.
+#
+# Usage: check_mcp_feeds_freshness.sh [warn_hours] [crit_hours]
 
-WARN_DAYS="${1:-8}"
-CRIT_DAYS="${2:-10}"
+WARN_HOURS="${1:-6}"
+CRIT_HOURS="${2:-24}"
 CTR="mcp-feeds"
 SOCK="/run/podman/podman.sock"
 API="http://localhost/v5.0.0"
@@ -49,15 +57,15 @@ if [ -z "$MOD_EPOCH" ]; then
     exit 3
 fi
 
-AGE_DAYS=$(( (NOW_EPOCH - MOD_EPOCH) / 86400 ))
+AGE_HOURS=$(( (NOW_EPOCH - MOD_EPOCH) / 3600 ))
 
-if [ "$AGE_DAYS" -ge "$CRIT_DAYS" ]; then
-    echo "CRITICAL - mcp-feeds last refreshed ${AGE_DAYS}d ago (newest last_fetched: $LAST_FETCHED) [warn:${WARN_DAYS}d crit:${CRIT_DAYS}d] | age=${AGE_DAYS}d;${WARN_DAYS};${CRIT_DAYS};0"
+if [ "$AGE_HOURS" -ge "$CRIT_HOURS" ]; then
+    echo "CRITICAL - mcp-feeds last refreshed ${AGE_HOURS}h ago (newest last_fetched: $LAST_FETCHED) [warn:${WARN_HOURS}h crit:${CRIT_HOURS}h] | age=${AGE_HOURS}h;${WARN_HOURS};${CRIT_HOURS};0"
     exit 2
-elif [ "$AGE_DAYS" -ge "$WARN_DAYS" ]; then
-    echo "WARNING - mcp-feeds last refreshed ${AGE_DAYS}d ago (newest last_fetched: $LAST_FETCHED) [warn:${WARN_DAYS}d crit:${CRIT_DAYS}d] | age=${AGE_DAYS}d;${WARN_DAYS};${CRIT_DAYS};0"
+elif [ "$AGE_HOURS" -ge "$WARN_HOURS" ]; then
+    echo "WARNING - mcp-feeds last refreshed ${AGE_HOURS}h ago (newest last_fetched: $LAST_FETCHED) [warn:${WARN_HOURS}h crit:${CRIT_HOURS}h] | age=${AGE_HOURS}h;${WARN_HOURS};${CRIT_HOURS};0"
     exit 1
 else
-    echo "OK - mcp-feeds last refreshed ${AGE_DAYS}d ago (newest last_fetched: $LAST_FETCHED) | age=${AGE_DAYS}d;${WARN_DAYS};${CRIT_DAYS};0"
+    echo "OK - mcp-feeds last refreshed ${AGE_HOURS}h ago (newest last_fetched: $LAST_FETCHED) | age=${AGE_HOURS}h;${WARN_HOURS};${CRIT_HOURS};0"
     exit 0
 fi
