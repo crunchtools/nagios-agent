@@ -102,8 +102,9 @@ ghcr_tags() {
         "${GHCR}/token?scope=repository:${ORG}/${img}:pull&service=ghcr.io" \
         | grep -oP '"token":\s*"\K[^"]+') || return 1
     [ -n "$token" ] || return 1
+    # ghcr pages tags/list at 100 by default; ask for everything in one page.
     body=$(curl -sf --max-time "$NET_TIMEOUT" -H "Authorization: Bearer ${token}" \
-        "${GHCR}/v2/${ORG}/${img}/tags/list") || return 1
+        "${GHCR}/v2/${ORG}/${img}/tags/list?n=10000") || return 1
     printf '%s' "$body" | grep -oP '"tags":\s*\[\K[^]]*' | tr ',' '\n' | tr -d ' "'
     return 0
 }

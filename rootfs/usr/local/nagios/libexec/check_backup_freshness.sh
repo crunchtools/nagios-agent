@@ -29,7 +29,7 @@ M_WARN=70 M_CRIT=100   # days — each monthly rotation fires every other month
 
 # label|rotation|warn|crit|min_bytes|mode|path
 #   mode=file : path is the exact dump file
-#   mode=dir  : newest *.db / *.sqlite* under path (recursive)
+#   mode=dir  : newest *.db / *.sqlite* under path (recursive); ties go to the largest
 SENTINELS="
 crunchtools-db|Weekly-1|$W_WARN|$W_CRIT|15000000|file|crunchtools.com/backups/all-databases.sql
 educatedconfusion-db|Weekly-1|$W_WARN|$W_CRIT|10000000|file|educatedconfusion.com/backups/all-databases.sql
@@ -60,7 +60,7 @@ probe() { # writes: label|rot|status|age_days|size|message  to $TMP/<label>
     else
         out=$(timeout 8 "$RCLONE" --config "$CONF" lsf -R --files-only \
               --include '*.db' --include '*.sqlite*' \
-              --format ts --separator '|' "$BASE/$rot/$path" 2>/dev/null | sort -r | head -1)
+              --format ts --separator '|' "$BASE/$rot/$path" 2>/dev/null | sort -t"|" -k1,1r -k2,2nr | head -1)
     fi
     if [ -z "$out" ]; then
         echo "$label|$rot|2|-1|0|$label: MISSING ($rot/$path)" > "$TMP/$label"; return
