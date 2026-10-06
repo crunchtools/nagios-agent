@@ -41,7 +41,9 @@ daemon is the sole witness to its own death.
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_systemd_units.sh`, `check_tcp_local.sh`.
 7. **Backup freshness** — the weekly pCloud dumps by age and size floor
-   (`check_backup_freshness.sh`), and the nightly in-container dumps read on disk
+   (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
+   `crunchtools/pbs` writes after each sync
+   (`check_personal_backup_freshness.sh`), and the nightly in-container dumps read on disk
    under `/var/srv` before they ever reach pCloud (`check_nightly_dump.sh` +
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service

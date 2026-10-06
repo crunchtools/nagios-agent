@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-06
+
+### Added
+
+- `check_personal_backup_freshness`: age and exit status of each personal
+  pCloud rotation (Documents, Downloads, Autosync, Projects in Weekly-1,
+  Monthly-1 and Monthly-2), read from the markers `crunchtools/pbs` 2.0.0
+  writes to `pcloud:Backups/Rotations/`. One rclone call for all twelve. WARN
+  9d / CRIT 16d weekly, 70d / 100d monthly; a missing marker or a non-zero
+  rclone exit is CRITICAL (crunchtools/pbs#16). NRPE command and service
+  definition under `deploy/`.
+
+### Fixed
+
+- `check_backup_freshness.sh` breaks a tie between equal mtimes on size
+  numerically. A lexical sort picked a 90 KB database over an 8 MB one and
+  reported it too small.
+- `check_registry_drift.sh` asks GHCR for up to 10,000 tags. The default page
+  of 100 hid the newest tag of an image with 108.
+
 ### Changed
 
 - Constitution is now a v1.18.0 manifest: it holds only what is specific to
