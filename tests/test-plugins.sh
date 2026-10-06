@@ -1,6 +1,6 @@
 #!/bin/bash
-# Offline tests for the exec-free container plugins (RT #1513) and the
-# Cloudflare component filter. curl and
+# Offline tests for the exec-free container plugins (RT #1513), the
+# Cloudflare component filter and the personal backup markers. curl, rclone and
 # podman_exec.sh are stubbed, so this runs anywhere with bash and GNU grep -P,
 # no Podman socket needed.
 set -uo pipefail
@@ -167,6 +167,42 @@ STUB_INSPECT='' expect "missing exit code is an error, not 0" 3 "EXEC_ERROR: no 
 STUB_INSPECT='{"ExitCode":0}' expect "empty stream gives empty output" 0 "^$" any -- px ctr true
 STUB_CREATE='{"cause":"no such container"}' STUB_INSPECT='' expect "exec that cannot be created exits 3" 3 "EXEC_ERROR: Cannot create exec" any -- px ctr true
 rm -rf "$XSTUBS"
+
+echo "=== check_personal_backup_freshness ==="
+PB="$LIBEXEC/check_personal_backup_freshness.sh"
+RSTUBS="$(mktemp -d)"
+cat > "$RSTUBS/rclone" <<'STUB'
+#!/bin/bash
+printf '%s' "${STUB_MARKERS:-}"
+exit "${STUB_RCLONE_RC:-0}"
+STUB
+chmod +x "$RSTUBS/rclone"
+pb() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$PB"; }
+# markers <weekly age days> <monthly age days> [rclone exit]: all twelve markers
+markers() {
+    local now; now=$(date +%s)
+    for d in Documents Downloads Autosync Projects; do
+        echo "Files|$d|Weekly-1|0|$((now - $1 * 86400))|${3:-0}"
+        echo "Files|$d|Monthly-1|0|$((now - $2 * 86400))|0"
+        echo "Files|$d|Monthly-2|0|$((now - $2 * 86400))|0"
+    done
+}
+STUB_MARKERS="$(markers 2 40)" expect "all twelve fresh" 0 "OK - Weekly-1 4/4 fresh \\(worst 2d\\); Monthly-1 4/4 .*problems=0" any -- pb
+STUB_MARKERS="$(markers 10 40)" expect "weekly past warn" 1 "WARNING .*Documents/Weekly-1: aging 10d" any -- pb
+STUB_MARKERS="$(markers 16 40)" expect "weekly past crit" 2 "CRITICAL .*Projects/Weekly-1: STALE 16d" any -- pb
+STUB_MARKERS="$(markers 2 69)" expect "monthly just inside warn" 0 "OK .*Monthly-2 4/4" any -- pb
+STUB_MARKERS="$(markers 2 100)" expect "monthly past crit" 2 "CRITICAL .*Autosync/Monthly-1: STALE 100d" any -- pb
+STUB_MARKERS="$(markers 0 40 3)" expect "fresh but failed run is CRITICAL" 2 "CRITICAL .*last run FAILED \\(rclone exit 3\\), 0d ago" any -- pb
+STUB_MARKERS="$(markers 2 40 | grep -v 'Downloads|Monthly-2')" \
+    expect "one missing marker" 2 "CRITICAL .*Monthly-2 3/4 .*Downloads/Monthly-2: MISSING marker" any -- pb
+STUB_MARKERS="$(markers 2 40 | sed 's/^Files|Autosync|Weekly-1|.*/Files|Autosync|Weekly-1|oops/')" \
+    expect "garbled marker" 2 "CRITICAL .*Autosync/Weekly-1: unreadable marker" any -- pb
+STUB_MARKERS="" STUB_RCLONE_RC=3 expect "no markers at all" 2 "CRITICAL - cannot read markers .*rclone exit 3" any -- pb
+STUB_MARKERS="" expect "empty folder" 2 "CRITICAL - cannot read markers .*rclone exit 0" any -- pb
+STUB_MARKERS="$(markers 2 40)" STUB_RCLONE_RC=1 expect "failed read is not judged on partial output" 2 "CRITICAL - cannot read markers .*rclone exit 1" any -- pb
+STUB_MARKERS="" STUB_RCLONE_RC=124 expect "timeout is UNKNOWN" 3 "UNKNOWN - timed out" any -- pb
+RCLONE=/nonexistent expect "rclone not mounted is UNKNOWN" 3 "UNKNOWN .*not mounted" any -- "$PB"
+rm -rf "$RSTUBS"
 
 echo
 echo "Results: $PASS passed, $FAIL failed"

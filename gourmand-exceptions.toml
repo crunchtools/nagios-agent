@@ -114,6 +114,12 @@ classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_personal_backup_freshness.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_cloudflare_global.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
