@@ -33,13 +33,16 @@ NOW=$(date +%s)
 W_WARN=9  W_CRIT=16    # days — Weekly-1 runs Fridays 06:00
 M_WARN=70 M_CRIT=100   # days — each monthly rotation fires every other month
 
-markers=$(timeout 12 "$RCLONE" --config "$CONF" cat "$BASE" 2>/dev/null)
+# Measured 2.4s on lotor for twelve markers; 8s matches the per-probe timeout
+# in check_backup_freshness and leaves half of command_timeout spare.
+markers=$(timeout 8 "$RCLONE" --config "$CONF" cat "$BASE" 2>/dev/null)
 rc=$?
 if [ "$rc" -eq 124 ]; then
     echo "UNKNOWN - timed out reading $BASE"; exit 3
 fi
-if [ -z "$markers" ]; then
-    echo "PERSONAL BACKUPS CRITICAL - no markers readable at $BASE (rclone exit $rc)"; exit 2
+# A read that failed part way would otherwise show its unread markers as MISSING.
+if [ "$rc" -ne 0 ] || [ -z "$markers" ]; then
+    echo "PERSONAL BACKUPS CRITICAL - cannot read markers at $BASE (rclone exit $rc)"; exit 2
 fi
 
 status=0; problems=(); summary=""; perf=""
