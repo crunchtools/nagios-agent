@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- mcp-trentina is now trentina (repo, image, service directory, container).
+  The config-drift service map, the backup-freshness path and the reference
+  copies of `nrpe-ctr.cfg` and `registry-images.conf` follow.
 - Constitution is now a v1.18.0 manifest: it holds only what is specific to
   this repo; fleet and profile rules apply by reference.
 - Constitution validation is pinned to the inherited release via

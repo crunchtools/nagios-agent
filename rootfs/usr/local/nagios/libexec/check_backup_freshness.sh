@@ -44,7 +44,7 @@ kagetora-db|Weekly-1|$W_WARN|$W_CRIT|100000|dir|kagetora.crunchtools.com/data
 mcp-feeds-db|Weekly-1|$W_WARN|$W_CRIT|30000000|file|mcp-feeds.crunchtools.com/data/feeds.db
 mcp-memory-db|Weekly-1|$W_WARN|$W_CRIT|5000000|dir|mcp-memory.crunchtools.com/data
 mcp-metsuke-db|Weekly-1|$W_WARN|$W_CRIT|50000|file|mcp-metsuke.crunchtools.com/data/metsuke.db
-mcp-trentina-db|Weekly-1|$W_WARN|$W_CRIT|200000|dir|mcp-trentina.crunchtools.com/data
+trentina-db|Weekly-1|$W_WARN|$W_CRIT|200000|dir|trentina.crunchtools.com/data
 newsletter-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|newsletter.crunchtools.com/data/kill-the-newsletter.db
 monthly1-crunchtools|Monthly-1|$M_WARN|$M_CRIT|15000000|file|crunchtools.com/backups/all-databases.sql
 monthly1-rotv|Monthly-1|$M_WARN|$M_CRIT|200000000|file|rootsofthevalley.org/backups/all-databases.sql
