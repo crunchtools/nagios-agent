@@ -66,7 +66,7 @@
 #
 # Neither is anything under docs/, tests/ or examples/. Those trees hold
 # illustrations, fixtures and placeholders, which are written to differ from
-# production and which nobody deploys from. mcp-trentina's
+# production and which nobody deploys from. trentina's
 # docs/demo/profiles.yaml, a three-profile demo fixture, matched the deployed
 # gateway profiles.yaml by name and turned the check amber the hour it was
 # committed. A repo that keeps a real reference copy keeps it under deploy/,
