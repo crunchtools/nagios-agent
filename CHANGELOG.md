@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-07
+
+MAJOR per the constitution: a verdict threshold on an existing check changed.
+
+### Changed
+
+- `check_procs_total` on lotor loosened from 900/1100 to 1300/1500. Transient
+  bursts to ~1,250 processes with every service healthy paged CRITICAL on
+  2026-10-07; the baseline is still ~600. A leak the size of RT #1513 (~500)
+  no longer alerts on this check.
+
 ## [2.1.0] - 2026-10-06
 
 ### Added
