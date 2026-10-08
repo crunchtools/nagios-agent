@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-10-08
+
+### Added
+
+- Container running and memory checks for `kagemusha.crunchtools.com`, and its
+  directory in `config-sources.conf` (it runs the openclaw image).
+
 ## [4.1.0] - 2026-10-08
 
 ### Added
