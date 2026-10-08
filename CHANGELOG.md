@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-08
+
+MAJOR per the constitution: a verdict threshold on an existing check changed.
+
+### Fixed
+
+- `check_procs_total` on lotor warns at 900 again; CRITICAL stays at 1500.
+  3.0.0 raised both lines on the belief that WARNING notifies. It does not:
+  the only contact takes CRITICAL alone, so the higher warning line stopped
+  no page and hid an RT #1513-sized leak (600 to ~1,100 processes) behind an
+  OK.
+
 ## [3.0.0] - 2026-10-07
 
 MAJOR per the constitution: a verdict threshold on an existing check changed.
