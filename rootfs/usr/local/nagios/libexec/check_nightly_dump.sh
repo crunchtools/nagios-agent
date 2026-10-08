@@ -7,6 +7,9 @@
 # the next morning instead of staying hidden behind a green pCloud sentinel for
 # up to seven days (the pCloud copy only refreshes on the Saturday sync).
 #
+# It also watches data-collector's database, which is no dump but is written by
+# a daily timer all the same: the sentinel list in the collector says why.
+#
 # HOW IT MEASURES. Like check_git_drift.sh, nrpe never reads /var/srv itself: it
 # asks podman to run srv-nightly-dump-collect.sh as root in this same container
 # and parses the answer. That split exists because postiz writes its dump 0600 in
