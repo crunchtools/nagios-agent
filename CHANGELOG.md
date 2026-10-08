@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-10-08
+
+### Added
+
+- `check_nightly_dump` also watches data-collector's `collector.db`, written
+  by a daily timer on the host. A failed run already shows as a failed unit;
+  this catches the timer that never fires.
+- data-collector in `config-sources.conf` and `registry-images.conf`, so the
+  config, registry and Quay checks cover it.
+
 ## [4.0.0] - 2026-10-08
 
 MAJOR per the constitution: a verdict threshold on an existing check changed.
