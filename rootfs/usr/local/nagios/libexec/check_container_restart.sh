@@ -85,11 +85,15 @@ if [ "$UPTIME" -lt "$CRIT_SECONDS" ]; then
         esac
     done <<< "$EVENTS"
 
+    if [ "$CURL_RC" -ne 0 ]; then
+        echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago, cause unknown (events read failed, curl exit $CURL_RC) | $PERF"
+        exit 2
+    fi
     if [ "$OOMS" -gt 0 ]; then
         echo "CRITICAL - Container $NAME OOM-killed, restarted ${UPTIME}s ago | $PERF"
         exit 2
     fi
-    if [ "$CURL_RC" -ne 0 ] || [ "$DIES" -eq 0 ]; then
+    if [ "$DIES" -eq 0 ]; then
         echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago, cause unknown (no die event readable) | $PERF"
         exit 2
     fi
