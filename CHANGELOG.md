@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Registry drift no longer flags `mcp-ashigaru` and `mcp-ashigaru-agent-claude`.
+  ashigaru v2.0.0 stopped publishing container images, so every new ashigaru
+  tag showed as missing from both registries.
+
 ## [4.2.0] - 2026-10-08
 
 ### Added
