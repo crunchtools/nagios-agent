@@ -6,8 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The Hermes checks run their probes inside the Kagetora container over the
+  podman exec socket. `check_hermes_exec.sh` sends `check_hermes_platforms.py`
+  or `check_hermes_context.py` in and runs it with the container's python3, so
+  the 0700 data dir never leaves its container. They replace
+  `check_hermes_probe.sh` and lotor's hermes-probe.timer: Crunchtools schedules
+  live in Hermes or Nagios, and Hermes cannot watch itself. An exec that cannot
+  run is still CRITICAL. (#63)
+
 ### Fixed
 
+- The context check reports UNKNOWN when its database query fails. The bash
+  probe suppressed sqlite3 errors, so a failed query read as "no open session",
+  which is OK.
+- A Matrix sync stop no longer lowers `platforms_ok` a second time when Matrix
+  was already counted as failed.
 - Registry drift no longer flags `mcp-ashigaru` and `mcp-ashigaru-agent-claude`.
   ashigaru v2.0.0 stopped publishing container images, so every new ashigaru
   tag showed as missing from both registries.

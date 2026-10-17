@@ -1,4 +1,16 @@
 repos:
+  # ruff runs from its own pre-commit environment, not a host install
+  # (constitution XII, host contract).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        types: [python]
+        stages: [pre-commit, pre-merge-commit]
+      - id: ruff-format
+        types: [python]
+        stages: [pre-commit, pre-merge-commit]
   - repo: local
     hooks:
       - id: gourmand

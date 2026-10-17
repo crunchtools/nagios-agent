@@ -228,7 +228,19 @@ classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
-path = "rootfs/usr/local/nagios/libexec/check_hermes_probe.sh"
+path = "rootfs/usr/local/nagios/libexec/check_hermes_context.py"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_hermes_exec.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_hermes_platforms.py"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
 
@@ -356,3 +368,15 @@ check = "CH001-absolute_paths"
 path = "deploy/**"
 classification = "by_design"
 justification = "nrpe-host.cfg and nrpe-ctr.cfg define NRPE commands by absolute libexec path. The path IS the command definition -- a relative path would not resolve for the daemon."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "rootfs/usr/local/nagios/libexec/check_hermes_context.py"
+justification = "Each Hermes probe is sent alone into the Kagetora container by check_hermes_exec.sh and runs with the standard library only, so the two probes cannot share a module; their check()/main() shapes match because both follow the Nagios plugin contract."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "rootfs/usr/local/nagios/libexec/check_hermes_platforms.py"
+justification = "Each Hermes probe is sent alone into the Kagetora container by check_hermes_exec.sh and runs with the standard library only, so the two probes cannot share a module; their check()/main() shapes match because both follow the Nagios plugin contract."
+classification = "by_design"
