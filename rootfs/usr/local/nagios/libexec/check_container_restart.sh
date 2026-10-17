@@ -12,16 +12,30 @@
 # field that moves. Keep crit_seconds >= the service's check_interval or a
 # restart can land and age out between two consecutive polls.
 #
+# Uptime alone cannot tell a crash from a deploy, and deploys were nearly every
+# page. Inside the crit window the podman events log says why the previous
+# container ended: its "die" event outlives --rm. An OOM kill, an exit other
+# than 0 or 143 (SIGTERM from systemctl stop/restart), or more than LOOP_MAX
+# deaths in the hour before this start is CRITICAL. A clean stop is OK. If the
+# events cannot be read, the restart stays CRITICAL; an unexplained restart is
+# never quiet.
+#
 # Reads the podman socket the container already exposes — no token, no bind
 # mount of the target's data (constitution XVI).
 
 NAME="$1"
 CRIT_SECONDS="${2:-300}"
-WARN_SECONDS="${3:-900}"
+WARN_SECONDS="${3:-0}"
+LOOP_MAX=3
 SOCK="/run/podman/podman.sock"
 
 if [ -z "$NAME" ]; then
     echo "UNKNOWN - usage: check_container_restart.sh <container-name> [crit_seconds] [warn_seconds]"
+    exit 3
+fi
+
+if ! [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "UNKNOWN - invalid container name"
     exit 3
 fi
 
@@ -46,12 +60,53 @@ if [ -z "$STARTED_EPOCH" ]; then
     exit 3
 fi
 
-UPTIME=$(( $(date +%s) - STARTED_EPOCH ))
+NOW=$(date +%s)
+UPTIME=$(( NOW - STARTED_EPOCH ))
 PERF="uptime=${UPTIME}s;${WARN_SECONDS};${CRIT_SECONDS}"
 
 if [ "$UPTIME" -lt "$CRIT_SECONDS" ]; then
-    echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago | $PERF"
-    exit 2
+    EVENTS=$(curl -s --max-time 10 --unix-socket "$SOCK" -G "http://localhost/v5.0.0/events" \
+        --data-urlencode stream=false \
+        --data-urlencode "since=$((STARTED_EPOCH - 3600))" --data-urlencode "until=$NOW" \
+        --data-urlencode "filters={\"container\":[\"$NAME\"],\"event\":[\"died\",\"oom\"]}" 2>/dev/null)
+    CURL_RC=$?
+    # One pass, no forks. The newest death by timeNano is the container this
+    # one replaced.
+    DIES=0 OOMS=0 LAST_T=-1 LAST_CODE="?"
+    while IFS= read -r ev; do
+        case "$ev" in
+            *'"status":"oom"'*) OOMS=$((OOMS + 1)) ;;
+            *'"status":"die"'*)
+                DIES=$((DIES + 1))
+                t=0 c="?"
+                [[ "$ev" =~ \"timeNano\":([0-9]+) ]] && t="${BASH_REMATCH[1]}"
+                [[ "$ev" =~ \"containerExitCode\":\"([0-9]+)\" ]] && c="${BASH_REMATCH[1]}"
+                if [ "$t" -gt "$LAST_T" ]; then LAST_T="$t" LAST_CODE="$c"; fi ;;
+        esac
+    done <<< "$EVENTS"
+
+    if [ "$CURL_RC" -ne 0 ]; then
+        echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago, cause unknown (events read failed, curl exit $CURL_RC) | $PERF"
+        exit 2
+    fi
+    if [ "$OOMS" -gt 0 ]; then
+        echo "CRITICAL - Container $NAME OOM-killed, restarted ${UPTIME}s ago | $PERF"
+        exit 2
+    fi
+    if [ "$DIES" -eq 0 ]; then
+        echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago, cause unknown (no die event readable) | $PERF"
+        exit 2
+    fi
+    if [ "$DIES" -gt "$LOOP_MAX" ]; then
+        echo "CRITICAL - Container $NAME restart loop: $DIES deaths in the hour before this start | $PERF"
+        exit 2
+    fi
+    if [ "$LAST_CODE" != 0 ] && [ "$LAST_CODE" != 143 ]; then
+        echo "CRITICAL - Container $NAME exited $LAST_CODE, restarted ${UPTIME}s ago | $PERF"
+        exit 2
+    fi
+    echo "OK - Container $NAME restarted ${UPTIME}s ago, clean stop (exit $LAST_CODE) | $PERF"
+    exit 0
 fi
 
 if [ "$UPTIME" -lt "$WARN_SECONDS" ]; then
