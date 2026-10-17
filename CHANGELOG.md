@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-17
+
+### Added
+
+- `check_ondemand_unit.sh <socket> <service> [path]` checks a service that
+  runs only on demand. It is CRITICAL when the socket or path unit that would
+  start the service is down, or when the service has failed. It is OK while
+  the service is idle or running. It needs host systemd, so it runs in the
+  fast pool only. dev.rootsofthevalley.org uses it as its host check.
+- `check_container_memory.sh` takes an optional fourth argument, `absent-ok`,
+  which reports a stopped container as OK instead of UNKNOWN.
+
 ### Removed
 
 - test.crunchtools.com checks (container running, memory, MariaDB, Apache

@@ -268,6 +268,49 @@ STUB_INSPECT='{"State":{"Status":"exited","Running":false}}' expect "stopped con
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- cr '../x"]}' 300 0
 rm -rf "$CSTUBS"
 
+echo "=== check_ondemand_unit ==="
+# systemctl stub: is-system-running prints $STUB_SYSTEM; show prints the state
+# for the unit's type from $STUB_SOCKET / $STUB_SERVICE / $STUB_PATH.
+OSTUBS="$(mktemp -d)"
+cat > "$OSTUBS/systemctl" <<'STUB'
+#!/bin/bash
+case "$1" in
+    is-system-running) echo "${STUB_SYSTEM-running}"; exit 0 ;;
+    show)
+        unit="${!#}"
+        case "$*" in *ActiveEnterTimestamp*) echo "Fri 2026-10-17 10:00:00 EDT"; exit 0 ;; esac
+        case "$unit" in
+            *.socket) echo "${STUB_SOCKET-active}" ;;
+            *.path) echo "${STUB_PATH-active}" ;;
+            *) echo "${STUB_SERVICE-inactive}" ;;
+        esac ;;
+esac
+STUB
+chmod +x "$OSTUBS/systemctl"
+OU="$LIBEXEC/check_ondemand_unit.sh"
+ou() { PATH="$OSTUBS:$PATH" "$OU" "$@"; }
+expect "idle is OK" 0 "^OK .*idle, starts on demand" any -- ou d.socket d.service d.path
+STUB_SERVICE=active expect "running is OK" 0 "^OK .*running since" any -- ou d.socket d.service d.path
+STUB_SERVICE=activating expect "starting is OK" 0 "^OK .*starting" any -- ou d.socket d.service
+STUB_SERVICE=failed expect "failed service is CRITICAL" 2 "^CRITICAL .*d.service failed" any -- ou d.socket d.service
+STUB_SOCKET=inactive expect "socket down is CRITICAL" 2 "^CRITICAL - d.socket is inactive: nothing will start" any -- ou d.socket d.service
+STUB_PATH=failed expect "path unit down is CRITICAL" 2 "^CRITICAL - d.path is failed" any -- ou d.socket d.service d.path
+STUB_SYSTEM=offline expect "no host systemd is UNKNOWN, not idle" 3 "^UNKNOWN .*no reachable system manager" any -- ou d.socket d.service
+STUB_SOCKET="" expect "unreadable state is UNKNOWN" 3 "^UNKNOWN - cannot read state of d.socket" any -- ou d.socket d.service
+STUB_SERVICE=weird expect "unexpected state is WARNING" 1 "^WARNING .*is weird" any -- ou d.socket d.service
+expect "missing args is UNKNOWN" 3 "^UNKNOWN - usage" any -- ou d.socket
+expect "bad unit name rejected" 3 "^UNKNOWN - invalid unit" any -- ou 'x;rm.socket' d.service
+rm -rf "$OSTUBS"
+
+echo "=== check_container_memory ==="
+CM="$LIBEXEC/check_container_memory.sh"
+NOTFOUND='{"cause":"no such container","message":"no container with name or ID \"x\" found","response":404}'
+STUB_SOCK="$NOTFOUND" expect "absent container is UNKNOWN by default" 3 "^UNKNOWN .*not found" any -- "$CM" x 85 95
+STUB_SOCK="$NOTFOUND" expect "absent-ok makes it OK" 0 "^OK - x not running \\(on demand\\)" any -- "$CM" x 85 95 absent-ok
+STUB_SOCK='{"cause":"connection refused","message":"cannot connect to podman","response":500}' \
+    expect "absent-ok does not hide other API errors" 3 "^UNKNOWN" any -- "$CM" x 85 95 absent-ok
+STUB_SOCK='{"memory_stats":{"usage":536870912,"limit":1073741824}}' expect "running container still measured with absent-ok" 0 "^OK - x memory 50%" any -- "$CM" x 85 95 absent-ok
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
