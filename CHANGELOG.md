@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-10-17
+
 ### Changed
 
 - The Hermes checks run their probes inside the Kagetora container over the
