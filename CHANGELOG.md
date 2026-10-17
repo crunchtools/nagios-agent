@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - The repo carries the mcp-workboard checks (container running, memory, port
   8031, registry drift) that were deployed on lotor but never committed, which
-  kept the cross-repo config drift check at WARNING.
+  kept the cross-repo config drift check at WARNING. config-sources.conf maps
+  dev.rootsofthevalley.org, josui, mcp-rhhi and mcp-workboard to their repos.
 
 ## [4.3.0] - 2026-10-17
 
