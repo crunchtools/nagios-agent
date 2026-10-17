@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-17
+
+### Changed
+
+- **BREAKING:** `check_container_restart.sh` reports a clean restart as OK.
+  Inside the crit window it reads the replaced container's `die` event from
+  the podman events API over the socket it already uses. It stays CRITICAL on
+  an OOM kill, an exit other than 0 or 143, more than three deaths in the hour
+  before the start, or when no die event can be read. Over the previous month
+  the uptime-only verdict sent about 78 pages to Hermes, nearly all of them
+  deploys. The warn default is now 0, and both NRPE pools pass `300 0`.
+- **BREAKING:** `check_procs_total` is now `-w 2000 -c 2500`, up from 900/1500.
+  Healthy bursts peaked at 1747, and once at 1921. They paged 7 times against
+  1500, and the 900 WARNING line flapped 301 times.
+
+### Fixed
+
+- `check_container_restart.sh` rejects container names outside
+  `[A-Za-z0-9_.-]`, because the name now goes into a JSON filter.
+
 ## [4.3.1] - 2026-10-17
 
 ### Fixed
