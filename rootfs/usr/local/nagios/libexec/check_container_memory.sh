@@ -1,15 +1,24 @@
 #!/bin/bash
 # Check container memory usage via podman API socket (pure bash, no python)
-# Usage: check_container_memory.sh <container-name> <warn%> <crit%>
+# Usage: check_container_memory.sh <container-name> <warn%> <crit%> [absent-ok]
+#
+# absent-ok is for containers that run on demand: not running is their idle
+# state, and check_ondemand_unit.sh is what alerts if they cannot start.
 
 NAME="$1"
 WARN="${2:-85}"
 CRIT="${3:-95}"
+ABSENT="${4:-}"
 SOCK="/run/podman/podman.sock"
 
 RAW=$(curl -s --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${NAME}/stats?stream=false" 2>/dev/null)
 
 if echo "$RAW" | grep -q '"cause"'; then
+    # Only "no such container" means idle; any other API error is UNKNOWN.
+    if [ "$ABSENT" = absent-ok ] && echo "$RAW" | grep -q '"response":404'; then
+        echo "OK - $NAME not running (on demand)"
+        exit 0
+    fi
     echo "UNKNOWN - Container '$NAME' not found or not running"
     exit 3
 fi
