@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - test.crunchtools.com checks (container running, memory, MariaDB, Apache
   internal, PHP-FPM), its backup freshness entry and its config-sources
   mapping. The site was decommissioned (RT #1528).
+- mcp-ashigaru checks (container running, memory, zombie processes) and both
+  config-sources mappings (`mcp-ashigaru.crunchtools.com`, `ashigaru`). The
+  Ashigaru v1 server was decommissioned; the factory now runs as
+  claude-code-action workflows on GitHub Actions (RT #1523).
 
 ## [5.0.0] - 2026-10-17
 
