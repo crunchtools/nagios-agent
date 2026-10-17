@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-10-17
+
 ### Fixed
 
 - The repo carries the mcp-workboard checks (container running, memory, port
