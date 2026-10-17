@@ -70,14 +70,20 @@ if [ "$UPTIME" -lt "$CRIT_SECONDS" ]; then
         --data-urlencode "since=$((STARTED_EPOCH - 3600))" --data-urlencode "until=$NOW" \
         --data-urlencode "filters={\"container\":[\"$NAME\"],\"event\":[\"died\",\"oom\"]}" 2>/dev/null)
     CURL_RC=$?
-    DIES=$(printf '%s\n' "$EVENTS" | grep -c '"status":"die"')
-    OOMS=$(printf '%s\n' "$EVENTS" | grep -c '"status":"oom"')
-    # Most recent death by timeNano: the container this one replaced.
-    LAST_CODE=$(printf '%s\n' "$EVENTS" | grep '"status":"die"' | while IFS= read -r ev; do
-        t=$(echo "$ev" | grep -o '"timeNano":[0-9]*' | cut -d: -f2)
-        c=$(echo "$ev" | grep -o '"containerExitCode":"[0-9]*"' | grep -o '[0-9][0-9]*')
-        echo "${t:-0} ${c:-?}"
-    done | sort -n | tail -1 | cut -d' ' -f2)
+    # One pass, no forks. The newest death by timeNano is the container this
+    # one replaced.
+    DIES=0 OOMS=0 LAST_T=-1 LAST_CODE="?"
+    while IFS= read -r ev; do
+        case "$ev" in
+            *'"status":"oom"'*) OOMS=$((OOMS + 1)) ;;
+            *'"status":"die"'*)
+                DIES=$((DIES + 1))
+                t=0 c="?"
+                [[ "$ev" =~ \"timeNano\":([0-9]+) ]] && t="${BASH_REMATCH[1]}"
+                [[ "$ev" =~ \"containerExitCode\":\"([0-9]+)\" ]] && c="${BASH_REMATCH[1]}"
+                if [ "$t" -gt "$LAST_T" ]; then LAST_T="$t" LAST_CODE="$c"; fi ;;
+        esac
+    done <<< "$EVENTS"
 
     if [ "$CURL_RC" -ne 0 ] || [ "$DIES" -eq 0 ]; then
         echo "CRITICAL - Container $NAME restarted ${UPTIME}s ago, cause unknown (no die event readable) | $PERF"
