@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- test.crunchtools.com checks (container running, memory, MariaDB, Apache
+  internal, PHP-FPM), its backup freshness entry and its config-sources
+  mapping. The site was decommissioned (RT #1528).
+
 ## [5.0.0] - 2026-10-17
 
 ### Changed

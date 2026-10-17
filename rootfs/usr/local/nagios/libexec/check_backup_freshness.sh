@@ -35,7 +35,6 @@ crunchtools-db|Weekly-1|$W_WARN|$W_CRIT|15000000|file|crunchtools.com/backups/al
 educatedconfusion-db|Weekly-1|$W_WARN|$W_CRIT|10000000|file|educatedconfusion.com/backups/all-databases.sql
 learn-wiki-db|Weekly-1|$W_WARN|$W_CRIT|100000000|file|learn.fatherlinux.com/data/backups/my_wiki.sql
 rt-db|Weekly-1|$W_WARN|$W_CRIT|15000000|file|rt.fatherlinux.com/data/backups/rt4.sql
-test-crunchtools-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|test.crunchtools.com/backups/all-databases.sql
 rootsofthevalley-db|Weekly-1|$W_WARN|$W_CRIT|200000000|file|rootsofthevalley.org/backups/all-databases.sql
 images-rotv-db|Weekly-1|$W_WARN|$W_CRIT|400000|file|images.rootsofthevalley.org/backups/all-databases.sql
 postiz-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|postiz.crunchtools.com/backups/all-databases.sql
