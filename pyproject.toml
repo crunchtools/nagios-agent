@@ -1,0 +1,18 @@
+# Lint settings for the Python plugins (the Hermes probes) and their tests.
+# No pytest rules (PT): the tests are standard-library unittest, like the probes.
+# Not a Python package: the plugins are single files run by NRPE, and the
+# Hermes probes are sent alone into the Kagetora container, so they import
+# nothing outside the standard library.
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "T10", "ISC", "PIE", "RET", "SIM", "TID", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
