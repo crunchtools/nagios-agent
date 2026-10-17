@@ -68,8 +68,10 @@ def writer_fault(proc, pid, start):
         return "no writer_pid recorded"
     try:
         stat = (Path(proc) / str(pid) / "stat").read_text()
-    except OSError:
+    except FileNotFoundError:
         return f"writer pid {pid} is gone"
+    except OSError as e:
+        return f"writer pid {pid} cannot be checked ({e.strerror})"
     if start is None:
         return None  # nothing to compare; liveness is enough
     actual = stat.rsplit(") ", 1)[1].split()[STARTTIME_AFTER_COMM]

@@ -97,6 +97,14 @@ class Platforms(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("is gone", out)
 
+    def test_unreadable_writer_stat_names_the_error(self):
+        proc = Path(self.dir.name) / "proc"
+        (proc / "42" / "stat").mkdir(parents=True)  # reading a directory fails, but not as "gone"
+        self.write(matrix=platform(pid=42), webhook=platform())
+        code, out = platforms.check(self.data, ["webhook", "matrix"], proc=proc)
+        self.assertEqual(code, 2)
+        self.assertIn("writer pid 42 cannot be checked", out)
+
     def test_recycled_writer_is_critical(self):
         self.write(matrix=platform(start=MY_START + 1), webhook=platform())
         code, out = self.run_check()
