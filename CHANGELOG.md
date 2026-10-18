@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-10-18
+
+### Fixed
+
+- Map bridge-rcs-kagetora and bridge-rcs-takeda to the trentina repo, so the
+  config drift check covers them instead of reporting them unmapped (RT #1529).
+
 ## [5.1.0] - 2026-10-17
 
 ### Added
