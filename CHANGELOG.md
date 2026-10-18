@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-10-18
+
+### Fixed
+
+- Map bridge-rcs-josui to the trentina repo and conduit-josui to none, and
+  add their container checks to the deployed nrpe-ctr.cfg, so the config
+  drift check covers Josui Prime's RCS channel (RT #1531).
+
 ## [5.1.1] - 2026-10-18
 
 ### Fixed
