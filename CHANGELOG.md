@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_tig_trends.sh`: WARNING while a Grafana trend rule fires, with what
+  it fired for; UNKNOWN if Grafana cannot be read; never CRITICAL. The trend
+  rules no longer page, so this is where they surface (crunchtools/tig#22).
+  Every branch is exercised through `check_nrpe` on lotor before release.
+
 ## [5.1.2] - 2026-10-18
 
 ### Fixed
