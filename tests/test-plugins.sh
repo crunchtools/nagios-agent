@@ -311,6 +311,15 @@ STUB_SOCK='{"cause":"connection refused","message":"cannot connect to podman","r
     expect "absent-ok does not hide other API errors" 3 "^UNKNOWN" any -- "$CM" x 85 95 absent-ok
 STUB_SOCK='{"memory_stats":{"usage":536870912,"limit":1073741824}}' expect "running container still measured with absent-ok" 0 "^OK - x memory 50%" any -- "$CM" x 85 95 absent-ok
 
+echo "=== check_tig_trends ==="
+TT="$LIBEXEC/check_tig_trends.sh"
+STUB_EXEC='' expect "nothing firing is OK" 0 "^OK - no trend alert firing" yes -- "$TT"
+STUB_EXEC=$'Disk fills within 7 days: /etc, /var\n' expect "a firing rule is WARNING" 1 "^WARNING - Disk fills within 7 days: /etc, /var \\| firing=1$" yes -- "$TT"
+STUB_EXEC=$'Disk fills within 7 days: /var\nSwap grew more than 1 GiB in 6 hours: lotor\n' \
+    expect "two rules are joined on one line" 1 "^WARNING - Disk.*/var; Swap.*lotor \\| firing=2$" yes -- "$TT"
+STUB_EXEC="Disk fills within 7 days: $(printf '/p%03d, ' $(seq 1 100))" expect "long output is truncated" 1 "^WARNING - .{300}\\.\\.\\. \\| firing=1$" yes -- "$TT"
+STUB_EXEC='cannot read Grafana alert rules: refused' STUB_EXEC_RC=1 expect "unreadable Grafana is UNKNOWN, never CRITICAL" 3 "^UNKNOWN - could not read Grafana alert rules" yes -- "$TT"
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
