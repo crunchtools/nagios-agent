@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-10-19
+
 ### Added
 
 - `check_tig_trends.sh`: WARNING while a Grafana trend rule fires, with what
