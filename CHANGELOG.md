@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- Factory watchdog monitoring: `check_factory_status.sh`,
+  `check_factory_health.sh`, `deploy/nagios/factory-status.cfg`, the
+  `check_ctr_run_/check_ctr_mem_factory_crunchtools_com` and
+  `check_procs_factory_watchdog` commands, the factory status bind mount, and
+  the `factory` entries in `registry-images.conf` and `config-sources.conf`.
+  factory.crunchtools.com is decommissioned: it spent ~5,200 GitHub REST
+  calls an hour and its checks are covered by per-repo CI, constitution
+  fleet-drift, Ashigaru and the weekend report. The three Quay staleness
+  services move from `factory-host` to `lotor.dc3.crunchtools.com`.
+
 ## [5.2.0] - 2026-10-19
 
 ### Added

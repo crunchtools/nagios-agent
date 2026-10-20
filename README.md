@@ -28,19 +28,16 @@ daemon is the sole witness to its own death.
    restarts, all via the podman socket the agent already has.
    `check_container_running.sh`, `check_container_memory.sh`,
    `check_container_restart.sh`.
-3. **Fleet health** — the factory watchdog's verdict across every repo in the
-   org, read from its status file rather than pushed anywhere.
-   `check_factory_status.sh`, `check_factory_health.sh`.
-4. **Supply chain** — Quay tag staleness and whether an image is being pulled
+3. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
    `check_quay_pull_source.sh`.
-5. **Credential liveness** — Google OAuth grants tested by asking the backend
+4. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
    credential. `check_google_oauth.sh`.
-6. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
+5. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_systemd_units.sh`, `check_tcp_local.sh`.
-7. **Backup freshness** — the weekly pCloud dumps by age and size floor
+6. **Backup freshness** — the weekly pCloud dumps by age and size floor
    (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
    `crunchtools/pbs` writes after each sync
    (`check_personal_backup_freshness.sh`), and the nightly in-container dumps read on disk
@@ -48,7 +45,7 @@ daemon is the sole witness to its own death.
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service
    writes its dump `0600`.
-7. **Configuration drift, three doors** — `/srv` against its own git
+6. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
    repo that also carries it (`check_config_drift.sh`). The third exists
