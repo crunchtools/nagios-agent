@@ -48,12 +48,6 @@ classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
-path = "rootfs/usr/local/nagios/libexec/check_factory_health.sh"
-justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
-classification = "by_design"
-
-[[exceptions]]
-check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_mem.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
@@ -97,12 +91,6 @@ classification = "by_design"
 [[exceptions]]
 check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_google_oauth.sh"
-justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
-classification = "by_design"
-
-[[exceptions]]
-check = "random_scripts"
-path = "rootfs/usr/local/nagios/libexec/check_factory_status.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
 
