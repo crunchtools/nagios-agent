@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-10-24
+
+### Changed
+
+- `check_backup_freshness.sh` names the worst sentinel on its first line
+  (`BACKUPS CRITICAL - rt-db: MISSING (...) [+N more]; Weekly-1 13/14 fresh
+  ...`), because notifications carry only that line. Perfdata gains
+  `unknown=` and `elapsed=`. UNKNOWN now outranks WARNING.
+
+### Fixed
+
+- Backup Freshness flapped CRITICAL/UNKNOWN on slow pCloud listings (RT
+  #1543). The run now sits inside a 12s deadline (`BUDGET`, `PROBE_T` 6s per
+  listing), under NRPE's 15s `command_timeout`. Sentinels reached with under
+  2s left report UNCHECKED instead of timing out the whole check. rclone's
+  exit code is captured instead of lost in a pipe, so a timeout or listing
+  error is UNKNOWN after one retry, and only "not found" (exit 3/4) or an
+  empty listing is CRITICAL MISSING.
+
 ## [6.0.0] - 2026-10-24
 
 ### Changed

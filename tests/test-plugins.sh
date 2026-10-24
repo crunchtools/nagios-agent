@@ -204,6 +204,50 @@ STUB_MARKERS="" STUB_RCLONE_RC=124 expect "timeout is UNKNOWN" 3 "UNKNOWN - time
 RCLONE=/nonexistent expect "rclone not mounted is UNKNOWN" 3 "UNKNOWN .*not mounted" any -- "$PB"
 rm -rf "$RSTUBS"
 
+echo "=== check_backup_freshness ==="
+BF="$LIBEXEC/check_backup_freshness.sh"
+BSTUBS="$(mktemp -d)"
+# rclone stub keyed on the listed path (its last argument): STUB_SLOW hangs,
+# STUB_FAIL exits STUB_FAIL_RC, STUB_GONE exits 3 like a missing directory;
+# everything else lists one file STUB_AGE days old and STUB_SIZE bytes. Each
+# call appends the path to $STUB_CALLS so retries can be counted.
+cat > "$BSTUBS/rclone" <<'STUB'
+#!/bin/bash
+p="${!#}"
+echo "$p" >> "$STUB_CALLS"
+hit() { [ -n "$1" ] && [[ "$p" == *"$1"* ]]; }
+hit "${STUB_SLOW:-}" && exec sleep 30
+hit "${STUB_FAIL:-}" && { echo "Failed to lsf: pcloud said no" >&2; exit "${STUB_FAIL_RC:-1}"; }
+hit "${STUB_GONE:-}" && { echo "directory not found" >&2; exit 3; }
+echo "$(date -d "@$(( $(date +%s) - ${STUB_AGE:-1} * 86400 ))" '+%Y-%m-%d %H:%M:%S')|${STUB_SIZE:-999999999}"
+STUB
+chmod +x "$BSTUBS/rclone"
+export STUB_CALLS="$BSTUBS/calls"
+bf() { : > "$STUB_CALLS"; RCLONE="$BSTUBS/rclone" CONF=/dev/null "$BF"; }
+# within <secs> <desc>: the previous expect finished inside <secs> wall time
+within() {
+    if [ $((SECONDS - T0)) -le "$1" ]; then echo "  PASS: $2"; PASS=$((PASS + 1))
+    else echo "  FAIL: $2 (took $((SECONDS - T0))s)"; FAIL=$((FAIL + 1)); fi
+}
+expect "all fresh" 0 "^BACKUPS OK - Weekly-1 14/14 fresh \\(worst 1d\\); Monthly-1 1d; Monthly-2 1d \\|.* stale=0 unknown=0 elapsed=" any -- bf
+STUB_AGE=10 expect "weekly past warn" 1 "^BACKUPS WARNING - [a-z-]+: aging 10d \\(warn 9d\\) \\[\\+13 more\\]; Weekly-1 0/14" any -- bf
+STUB_AGE=20 expect "weekly past crit" 2 "^BACKUPS CRITICAL - [a-z-]+: STALE 20d \\(crit 16d\\)" any -- bf
+STUB_GONE=rt4.sql expect "missing dump is named on line 1" 2 "^BACKUPS CRITICAL - rt-db: MISSING \\(Weekly-1/rt.fatherlinux.com/data/backups/rt4.sql\\); Weekly-1 13/14" any -- bf
+STUB_FAIL=rt4.sql STUB_FAIL_RC=5 expect "rclone error is UNKNOWN, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: RCLONE ERROR \\(exit 5\\): Failed to lsf: pcloud said no; .* unknown=1 " any -- bf
+if [ "$(grep -c rt4.sql "$STUB_CALLS")" = 2 ]; then echo "  PASS: rclone error is retried once"; PASS=$((PASS + 1))
+else echo "  FAIL: rclone error retried $(grep -c rt4.sql "$STUB_CALLS") times"; FAIL=$((FAIL + 1)); fi
+T0=$SECONDS
+STUB_SLOW=rt4.sql PROBE_T=1 BUDGET=4 expect "slow listing is UNKNOWN TIMEOUT, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: TIMEOUT after 1s" any -- bf
+within 6 "timed-out listing stays inside the budget"
+STUB_GONE=rt4.sql STUB_SLOW=feeds.db PROBE_T=1 BUDGET=8 \
+    expect "MISSING outranks TIMEOUT" 2 "^BACKUPS CRITICAL - rt-db: MISSING .*\\[\\+1 more\\].*unknown=1 .*"$'\n'"rt-db: MISSING.*"$'\n'"mcp-feeds-db: TIMEOUT" any -- bf
+STUB_SIZE=10 expect "shrunken dump" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: TOO SMALL 10B" any -- bf
+T0=$SECONDS
+STUB_SLOW=lotor PROBE_T=2 BUDGET=3 expect "exhausted deadline leaves sentinels UNCHECKED" 3 "^BACKUPS UNKNOWN - [a-z0-9-]+: TIMEOUT .*, 18 unchecked;.*UNCHECKED \\(out of time\\)" any -- bf
+within 4 "exhausted deadline does not overrun"
+RCLONE=/nonexistent expect "rclone not mounted is UNKNOWN" 3 "UNKNOWN .*not mounted" any -- "$BF"
+rm -rf "$BSTUBS"
+
 echo "=== check_hermes_exec ==="
 HX="$LIBEXEC/check_hermes_exec.sh"
 export LIBEXEC
