@@ -1,8 +1,8 @@
 # Nagios Agent Container Constitution
 
-> **Version:** 1.1.0
+> **Version:** 1.2.0
 > **Ratified:** 2026-09-19
-> **Amended:** 2026-10-02
+> **Amended:** 2026-10-24
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.26.0
 > **Profile:** Container Image
@@ -20,8 +20,9 @@ answer `check_nrpe` requests from the server.
 ## Base Image and Packages
 
 `registry.access.redhat.com/ubi10/ubi-minimal`: the agent needs only the NRPE
-daemon, coreutils and curl. No httpd, no language runtime. EPEL 10 supplies
-`nrpe` and the stock `nagios-plugins-*`.
+daemon, coreutils and curl, plus single-purpose CLIs a plugin calls (`git-core`
+for the drift checks, `sqlite` for `check_sqlite_rows.sh`). No httpd, no
+language runtime. EPEL 10 supplies `nrpe` and the stock `nagios-plugins-*`.
 
 - **Podman socket group:** the image bakes in group `podmansock` (GID 1500) and
   adds `nrpe` to it. `podman run --group-add` does not work because nrpe's
@@ -102,3 +103,4 @@ no content. Path exclusions go in `.gourmand-exceptions.d/globals.toml` or
 | 1.0.0 | 2026-09-19 | Initial constitution |
 | 1.0.1 | 2026-09-25 | Corrected the `gourmand.toml` note |
 | 1.1.0 | 2026-10-02 | Manifest under constitution v1.18.0: fleet and profile restatement removed, agent specifics kept |
+| 1.2.0 | 2026-10-24 | Base image may carry single-purpose plugin CLIs (git-core, sqlite) |

@@ -36,7 +36,9 @@ daemon is the sole witness to its own death.
    credential. `check_google_oauth.sh`.
 5. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
-   `check_systemd_units.sh`, `check_tcp_local.sh`.
+   `check_systemd_units.sh`, `check_tcp_local.sh`. A FUSE mount that is
+   mounted and still answers a listing (`check_fuse_mount.sh`), and a SQLite
+   index that is not empty (`check_sqlite_rows.sh`).
 6. **Backup freshness** — the weekly pCloud dumps by age and size floor
    (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
    `crunchtools/pbs` writes after each sync

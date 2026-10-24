@@ -365,6 +365,64 @@ STUB_EXEC=$'Disk fills within 7 days: /var\nSwap grew more than 1 GiB in 6 hours
 STUB_EXEC="Disk fills within 7 days: $(printf '/p%03d, ' $(seq 1 100))" expect "long output is truncated" 1 "^WARNING - .{300}\\.\\.\\. \\| firing=1$" yes -- "$TT"
 STUB_EXEC='cannot read Grafana alert rules: refused' STUB_EXEC_RC=1 expect "unreadable Grafana is UNKNOWN, never CRITICAL" 3 "^UNKNOWN - could not read Grafana alert rules" yes -- "$TT"
 
+echo "=== mount-probe-collect (fake /proc/1) ==="
+MPC="$LIBEXEC/mount-probe-collect.sh"
+FP="$(mktemp -d)"
+mkdir -p "$FP/root/var/mnt/pcloud/Documents/a" "$FP/root/var/mnt/pcloud/Empty" "$FP/slowfind"
+touch "$FP/root/var/mnt/pcloud/Documents/b"
+echo '3854 47 0:234 / /var/mnt/pcloud ro,nosuid,nodev shared:2524 - fuse.rclone pcloud: ro,user_id=0' > "$FP/mountinfo"
+printf '#!/bin/bash\nsleep 5\n' > "$FP/slowfind/find"; chmod +x "$FP/slowfind/find"
+PROC_ROOT="$FP" expect "mounted and listing" 0 "fstype=fuse.rclone.*list_rc=0 entries=2 .*end=1" any -- "$MPC" /var/mnt/pcloud Documents 5
+PROC_ROOT="$FP" expect "missing subdir is a non-zero list_rc" 0 "list_rc=[1-9][0-9]* entries=0" any -- "$MPC" /var/mnt/pcloud Nope 5
+PROC_ROOT="$FP" PATH="$FP/slowfind:$PATH" expect "hung listing is list_rc=124" 0 "list_rc=124" any -- "$MPC" /var/mnt/pcloud Documents 1
+PROC_ROOT="$FP" expect "absent mount is mounted=0, no listing" 0 "^MPROBE mounted=0.MPROBE end=1$" any -- "$MPC" /var/mnt/other Documents 5
+PROC_ROOT="$FP" expect "dotdot rejected" 0 "error=invalid_subdir" any -- "$MPC" /var/mnt/pcloud ../../etc 5
+PROC_ROOT="$FP/nope" expect "no mountinfo is an error" 0 "error=no_host_mountinfo" any -- "$MPC" /var/mnt/pcloud Documents 5
+rm -rf "$FP"
+
+echo "=== check_fuse_mount ==="
+FM="$LIBEXEC/check_fuse_mount.sh"
+STUB_EXEC=$'MPROBE mounted=1 fstype=fuse.rclone\nMPROBE list_rc=0 entries=3 ms=420\nMPROBE end=1' \
+    expect "mounted and listing is OK" 0 "^FUSE MOUNT OK - /var/mnt/pcloud \\(fuse.rclone\\): Documents lists 3 entries in 0.42s \\| entries=3;;1:;0 elapsed=0.42s;;10;0$" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE mounted=0\nMPROBE end=1' expect "not a mountpoint is CRITICAL" 2 "^FUSE MOUNT CRITICAL - /var/mnt/pcloud is not a mountpoint" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE mounted=1 fstype=fuse.rclone\nMPROBE list_rc=124 entries=0 ms=10002\nMPROBE end=1' \
+    expect "timeout is CRITICAL" 2 "^FUSE MOUNT CRITICAL - listing .* timed out after 10s" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE mounted=1 fstype=fuse.rclone\nMPROBE list_rc=2 entries=0 ms=5\nMPROBE end=1' \
+    expect "listing failure is CRITICAL" 2 "^FUSE MOUNT CRITICAL - listing .* failed, exit 2" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE mounted=1 fstype=fuse.rclone\nMPROBE list_rc=0 entries=0 ms=5\nMPROBE end=1' \
+    expect "empty listing is CRITICAL" 2 "^FUSE MOUNT CRITICAL - .* lists empty" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE mounted=1 fstype=fuse.rclone' expect "truncated output is UNKNOWN" 3 "^FUSE MOUNT UNKNOWN - collector output truncated" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC=$'MPROBE error=no_host_mountinfo\nMPROBE end=1' expect "collector error is UNKNOWN" 3 "^FUSE MOUNT UNKNOWN - collector reported: no_host_mountinfo" yes -- "$FM" /var/mnt/pcloud Documents
+STUB_EXEC_RC=3 expect "exec failure is UNKNOWN" 3 "^FUSE MOUNT UNKNOWN - collector exec .* exited 3" yes -- "$FM" /var/mnt/pcloud Documents
+expect "missing args is UNKNOWN" 3 "^FUSE MOUNT UNKNOWN - usage" no -- "$FM" /var/mnt/pcloud
+expect "dotdot rejected before exec" 3 "^FUSE MOUNT UNKNOWN - invalid" no -- "$FM" /var/mnt/pcloud ../etc
+expect "bad timeout rejected" 3 "^FUSE MOUNT UNKNOWN - timeout" no -- "$FM" /var/mnt/pcloud Documents 0
+
+echo "=== check_sqlite_rows ==="
+SR="$LIBEXEC/check_sqlite_rows.sh"
+if ! command -v sqlite3 >/dev/null; then
+    echo "  FAIL: sqlite3 is required (check_sqlite_rows shells out to it)"
+    FAIL=$((FAIL + 1))
+else
+    SQ="$(mktemp -d)"
+    sqlite3 "$SQ/full.db" "PRAGMA journal_mode=WAL; CREATE TABLE files(id); INSERT INTO files VALUES (1),(2),(3);" >/dev/null
+    sqlite3 "$SQ/empty.db" "CREATE TABLE files(id);"
+    sqlite3 "$SQ/notable.db" "CREATE TABLE other(id);"
+    expect "rows present is OK" 0 "^SQLITE OK - files has 3 rows .* \\| rows=3;;1:;0$" any -- "$SR" "$SQ/full.db" files
+    expect "below min is CRITICAL" 2 "^SQLITE CRITICAL - files has 3 rows \\(min 5\\)" any -- "$SR" "$SQ/full.db" files 5
+    expect "empty table is CRITICAL" 2 "^SQLITE CRITICAL - files has 0 rows \\(min 1\\)" any -- "$SR" "$SQ/empty.db" files
+    expect "missing table is CRITICAL" 2 "^SQLITE CRITICAL - table files missing" any -- "$SR" "$SQ/notable.db" files
+    expect "missing database is CRITICAL" 2 "^SQLITE CRITICAL - .* does not exist" any -- "$SR" "$SQ/nope.db" files
+    [ -e "$SQ/nope.db" ] && { echo "  FAIL: a missing database was created"; FAIL=$((FAIL + 1)); }
+    echo "not a database" > "$SQ/junk.db"
+    expect "corrupt file is UNKNOWN" 3 "^SQLITE UNKNOWN - " any -- "$SR" "$SQ/junk.db" files
+    expect "injected table name rejected" 3 "^SQLITE UNKNOWN - invalid table" any -- "$SR" "$SQ/full.db" 'files; DROP TABLE files'
+    expect "URI metacharacters rejected" 3 "^SQLITE UNKNOWN - invalid database path" any -- "$SR" "$SQ/full.db?mode=rwc" files
+    mkdir "$SQ/slow"; printf '#!/bin/bash\nsleep 5\n' > "$SQ/slow/sqlite3"; chmod +x "$SQ/slow/sqlite3"
+    PATH="$SQ/slow:$PATH" SQLITE_TIMEOUT=1 expect "stalled query is UNKNOWN" 3 "^SQLITE UNKNOWN - query timed out after 1s" any -- "$SR" "$SQ/full.db" files
+    rm -rf "$SQ"
+fi
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
