@@ -4,7 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [6.0.0] - 2026-10-24
+
+### Changed
+
+- **Breaking:** `check_postiz_tokens.sh` no longer warns on a countdown. It sat WARNING on
+  LinkedIn's 60-day token for weeks with nothing to act on, because the Postiz
+  UI only offers the reconnect once the channel is broken. It now goes
+  CRITICAL only when a token has expired or Postiz sets `refreshNeeded`; days
+  left stay visible in the OK output. The `warn_days`/`crit_days` arguments
+  are gone, and `nrpe-ctr.cfg` drops them.
 
 ### Removed
 

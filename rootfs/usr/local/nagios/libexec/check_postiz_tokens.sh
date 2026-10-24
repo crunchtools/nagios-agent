@@ -13,21 +13,17 @@
 #                    past expiry -- both go CRITICAL below.
 #
 #   Manual         - no refresh token, so Postiz can never renew it and a human
-#                    has to redo the OAuth flow (linkedin). These are what the
-#                    day thresholds exist for. LinkedIn issues 60-day tokens and
-#                    once one lapses Postiz leaves posts sitting in QUEUE and
-#                    raises no alarm of its own.
+#                    has to redo the OAuth flow (linkedin). LinkedIn issues
+#                    60-day tokens and once one lapses Postiz leaves posts
+#                    sitting in QUEUE and raises no alarm of its own.
 #
-# Reconnecting is "Add Channel -> <provider>, same account" rather than clicking
-# the channel: the in-place reconnect badge only renders once refreshNeeded is
-# set, so it is unavailable for a planned re-auth. Re-running the OAuth flow
-# upserts on (organizationId, internalId), updating the existing channel rather
-# than creating a duplicate, so queued posts survive.
+# Neither class alerts on a countdown. The Postiz UI only offers the reconnect
+# once the channel is broken, so a warning weeks ahead is a nag with nothing to
+# act on (Scott, 2026-10-24). Days left still show in the OK output; the check
+# goes CRITICAL the moment a token expires or Postiz sets refreshNeeded.
 #
-# Usage: check_postiz_tokens.sh [warn_days] [crit_days]
+# Usage: check_postiz_tokens.sh
 
-WARN_DAYS="${1:-21}"
-CRIT_DAYS="${2:-7}"
 LIST_DAYS=365
 CTR="postiz.crunchtools.com"
 SOCK="/run/podman/podman.sock"
@@ -63,7 +59,7 @@ if [ -z "$ROWS" ]; then
     exit 3
 fi
 
-CRIT=""; WARN=""; AUTO=""; MANUAL=""
+CRIT=""; AUTO=""; MANUAL=""
 while IFS='|' read -r PLATFORM REFRESH HASREF DAYS NAME; do
     [ -z "$PLATFORM" ] && continue
     LABEL="$PLATFORM (${NAME:-unknown})"
@@ -72,12 +68,6 @@ while IFS='|' read -r PLATFORM REFRESH HASREF DAYS NAME; do
         CRIT="$CRIT; $LABEL is disconnected and needs reconnecting now"
     elif [ "$DAYS" -le 0 ]; then
         CRIT="$CRIT; $LABEL expired ${DAYS#-}d ago"
-    elif [ "$HASREF" = "1" ]; then
-        : # self-renewing and not yet broken -- reported, never alerted on
-    elif [ "$DAYS" -le "$CRIT_DAYS" ]; then
-        CRIT="$CRIT; $LABEL expires in ${DAYS}d and cannot auto-renew"
-    elif [ "$DAYS" -le "$WARN_DAYS" ]; then
-        WARN="$WARN; $LABEL expires in ${DAYS}d and cannot auto-renew"
     fi
 
     # Facebook, X, Mastodon and Bluesky carry expirations decades out. Listing
@@ -99,12 +89,9 @@ HOWTO="reconnect at $UI via Add Channel, signing in as the same account"
 # remedy text out of the alert and the notification mail.
 
 if [ -n "$CRIT" ]; then
-    echo "CRITICAL - Postiz:${CRIT#;}${WARN:+ -- also warning:${WARN#;}} -- $HOWTO"
+    echo "CRITICAL - Postiz:${CRIT#;} -- $HOWTO"
     exit 2
-elif [ -n "$WARN" ]; then
-    echo "WARNING - Postiz:${WARN#;} -- $HOWTO"
-    exit 1
 else
-    echo "OK - $COUNT Postiz integrations valid, none expiring within ${WARN_DAYS}d${MANUAL:+ -- manual:$MANUAL}${AUTO:+ -- auto-renewing:$AUTO}"
+    echo "OK - $COUNT Postiz integrations valid${MANUAL:+ -- manual:$MANUAL}${AUTO:+ -- auto-renewing:$AUTO}"
     exit 0
 fi
