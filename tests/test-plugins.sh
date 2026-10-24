@@ -219,7 +219,8 @@ hit() { [ -n "$1" ] && [[ "$p" == *"$1"* ]]; }
 hit "${STUB_SLOW:-}" && exec sleep 30
 hit "${STUB_FAIL:-}" && { echo "Failed to lsf: pcloud said no" >&2; exit "${STUB_FAIL_RC:-1}"; }
 hit "${STUB_GONE:-}" && { echo "directory not found" >&2; exit 3; }
-echo "$(date -d "@$(( $(date +%s) - ${STUB_AGE:-1} * 86400 ))" '+%Y-%m-%d %H:%M:%S')|${STUB_SIZE:-999999999}"
+# An hour of slack: probes in later waves run seconds after the plugin's START.
+echo "$(date -d "@$(( $(date +%s) - ${STUB_AGE:-1} * 86400 - 3600 ))" '+%Y-%m-%d %H:%M:%S')|${STUB_SIZE:-999999999}"
 STUB
 chmod +x "$BSTUBS/rclone"
 export STUB_CALLS="$BSTUBS/calls"
