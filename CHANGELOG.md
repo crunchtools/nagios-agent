@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-10-24
+
+### Fixed
+
+- The `check_backup_freshness` "all fresh" test was flaky: the rclone stub
+  dated files exactly one day before its own clock, so a later wave could
+  read 0d. It failed the v6.1.0 tag build, so v6.1.0 has no image; 6.1.1
+  carries the same plugin code.
+
 ## [6.1.0] - 2026-10-24
 
 ### Changed
