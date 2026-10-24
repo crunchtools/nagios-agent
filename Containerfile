@@ -27,7 +27,11 @@ RUN microdnf install -y \
     procps-ng \
     iproute \
     git-core \
+    sqlite \
     && microdnf clean all
+
+# sqlite: check_sqlite_rows.sh counts rows in a service's index database through
+# the read-only /var/srv mount (mcp-trove, RT #1542). The CLI only; no runtime.
 
 # Dedicated group for podman socket access.
 #

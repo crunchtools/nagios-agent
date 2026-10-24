@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-10-24
+
+### Added
+
+- mcp-trove monitoring (RT #1542). The usual MCP triple, `check_tcp_8032`,
+  `check_ctr_run_mcp_trove` and `check_ctr_mem_mcp_trove`, plus two checks for
+  what trove depends on, defined in `deploy/nagios/mcp-trove.cfg`:
+  - `check_fuse_mount.sh` + `mount-probe-collect.sh`: CRITICAL when
+    `/var/mnt/pcloud` is not a mountpoint in the host namespace, or a listing
+    of `Documents` fails, times out or comes back empty. The collector runs as
+    root through `podman_exec.sh` and walks `/proc/1/root`, so the agent unit
+    gains no new mount. `:5667` pool, as `check_trove_pcloud_mount`.
+  - `check_sqlite_rows.sh`: CRITICAL when a SQLite database or table is
+    missing or holds fewer than N rows. Opens the file with a `mode=ro` URI
+    through the read-only `/var/srv` mount, as nrpe. `:5666` pool, as
+    `check_trove_index`.
+- The image installs `sqlite` (the CLI) for `check_sqlite_rows.sh`.
+
 ## [6.1.1] - 2026-10-24
 
 ### Fixed
