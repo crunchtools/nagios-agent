@@ -13,7 +13,9 @@
 #             over 10% of its files fail; a backup or quick_check problem
 #   WARNING   errored files above warn-error-pct (default 5) of those found;
 #             the run spent its whole vision budget (files deferred to the next
-#             night: fine during a backfill, a spend leak otherwise); no backup
+#             night: fine during a backfill, a spend leak otherwise); the vision
+#             provider ran out of credit (mcp-trove 1.0.2+: the rest of the
+#             night's photos were deferred; top up the key); no backup
 #             recorded, or the newest one older than max-age-hours
 #   UNKNOWN   sqlite3 absent, the summary unreadable or not valid JSON
 #
@@ -63,7 +65,8 @@ SELECT json_valid(j),
        coalesce(json_extract(j, '\$.vision_calls'), 0),
        coalesce(json_extract(j, '\$.vision_budget'), 0),
        coalesce(round((julianday('now') - julianday(json_extract(j, '\$.latest_backup.created_at'))) * 24, 1), -1),
-       coalesce(json_extract(j, '\$.duration_seconds'), 0)
+       coalesce(json_extract(j, '\$.duration_seconds'), 0),
+       coalesce(json_extract(j, '\$.vision_out_of_credit'), 0)
 FROM s;
 EOF
 out=$(timeout "$TMO" sqlite3 -batch -noheader -separator $'\x1f' :memory: "$SQL" 2>&1)
@@ -74,7 +77,7 @@ if [ "$rc" -ne 0 ]; then
     exit 3
 fi
 
-IFS=$'\x1f' read -r valid status age problems bad found indexed errored deferred calls budget backup_age duration <<< "$out"
+IFS=$'\x1f' read -r valid status age problems bad found indexed errored deferred calls budget backup_age duration no_credit <<< "$out"
 if [ "$valid" != 1 ]; then
     echo "TROVE RUN UNKNOWN - $FILE is not valid JSON"
     exit 3
@@ -102,6 +105,9 @@ fi
 warnings=()
 if [ "$found" -gt 0 ] && [ $((errored * 100)) -gt $((found * WARN_PCT)) ]; then
     warnings+=("$errored of $found files failed")
+fi
+if [ "$no_credit" = 1 ]; then
+    warnings+=("vision provider out of credit, $deferred files deferred (top up the key)")
 fi
 if [ "$budget" -gt 0 ] && [ "$calls" -ge "$budget" ]; then
     warnings+=("vision budget of $budget calls spent, $deferred files deferred")

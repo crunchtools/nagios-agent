@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_trove_run.sh`: WARNING when the run's vision provider ran out of
+  credit (`vision_out_of_credit`, mcp-trove 1.0.2+), with the number of files
+  deferred, so the key gets topped up.
+
 ## [6.3.0] - 2026-10-25
 
 ### Added
