@@ -445,12 +445,16 @@ else
     run_json budget ok "$NOW" '[]' "$P_OK" 3000 "$B_NOW"
     run_json errors ok "$NOW" '[]' "$P_ERR" 1 "$B_NOW"
     run_json nobackup ok "$NOW" '[]' "$P_OK" 1 null
+    P_DEF='[{"path":"/a","status":"ok","files_found":100,"files_indexed":3,"files_errored":0,"files_deferred":40}]'
+    printf '{"status":"ok","finished_at":"%s","problems":[],"paths":%s,"vision_calls":12,"vision_budget":0,"vision_out_of_credit":true,"latest_backup":%s,"duration_seconds":60}\n' \
+        "$NOW" "$P_DEF" "$B_NOW" > "$TD/nocredit.json"
     echo 'not json' > "$TD/junk.json"
     expect "clean recent run is OK" 0 "^TROVE RUN OK - finished 0.0h ago: 100 files, 3 indexed, 1 errored, 10 vision calls \\| age_hours=" any -- "$TR" "$TD/ok.json"
     expect "stale run is CRITICAL" 2 "^TROVE RUN CRITICAL - last index run finished 40.0h ago" any -- "$TR" "$TD/stale.json"
     expect "failed run names its problems" 2 "^TROVE RUN CRITICAL - last index run failed: /pcloud is not mounted; /b aborted" any -- "$TR" "$TD/failed.json"
     expect "spent budget is WARNING" 1 "^TROVE RUN WARNING - vision budget of 3000 calls spent" any -- "$TR" "$TD/budget.json"
     expect "error rate over 5% is WARNING" 1 "^TROVE RUN WARNING - 8 of 100 files failed" any -- "$TR" "$TD/errors.json"
+    expect "out of credit is WARNING" 1 "^TROVE RUN WARNING - vision provider out of credit, 40 files deferred \\(top up the key\\)" any -- "$TR" "$TD/nocredit.json"
     expect "no backup recorded is WARNING" 1 "^TROVE RUN WARNING - no database backup recorded" any -- "$TR" "$TD/nobackup.json"
     expect "missing summary is CRITICAL" 2 "^TROVE RUN CRITICAL - no run summary" any -- "$TR" "$TD/nope.json"
     expect "invalid JSON is UNKNOWN" 3 "^TROVE RUN UNKNOWN - " any -- "$TR" "$TD/junk.json"
