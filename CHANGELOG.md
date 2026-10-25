@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.4.0] - 2026-10-25
+
 ### Added
 
 - `check_trove_run.sh`: WARNING when the run's vision provider ran out of
