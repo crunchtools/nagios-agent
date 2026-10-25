@@ -25,7 +25,7 @@
 #
 # rclone and its config are ro-mounted from the host into the agent container
 # (see the nagios-agent unit); runs unprivileged as the nrpe user.
-# Decommissioned services (openclaw, zabbix) are deliberately absent.
+# Decommissioned services (zabbix) are deliberately absent. takeda (ex-openclaw, renamed 2026-10-25) is monitored as takeda-db.
 
 RCLONE=${RCLONE:-/usr/local/bin/rclone}
 CONF=${CONF:-/etc/nagios/rclone.conf}
@@ -57,6 +57,7 @@ images-rotv-db|Weekly-1|$W_WARN|$W_CRIT|400000|file|images.rootsofthevalley.org/
 postiz-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|postiz.crunchtools.com/backups/all-databases.sql
 acquacotta-db|Weekly-1|$W_WARN|$W_CRIT|1000|dir|acquacotta.crunchtools.com/data
 kagetora-db|Weekly-1|$W_WARN|$W_CRIT|100000|dir|kagetora.crunchtools.com/data
+takeda-db|Weekly-1|$W_WARN|$W_CRIT|50000|dir|takeda.crunchtools.com/data
 mcp-feeds-db|Weekly-1|$W_WARN|$W_CRIT|30000000|file|mcp-feeds.crunchtools.com/data/feeds.db
 mcp-memory-db|Weekly-1|$W_WARN|$W_CRIT|5000000|dir|mcp-memory.crunchtools.com/data
 mcp-metsuke-db|Weekly-1|$W_WARN|$W_CRIT|50000|file|mcp-metsuke.crunchtools.com/data/metsuke.db
