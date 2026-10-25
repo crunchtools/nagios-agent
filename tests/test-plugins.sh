@@ -423,6 +423,41 @@ else
     rm -rf "$SQ"
 fi
 
+echo "=== check_trove_run ==="
+TR="$LIBEXEC/check_trove_run.sh"
+if ! command -v sqlite3 >/dev/null; then
+    echo "  FAIL: sqlite3 is required (check_trove_run parses JSON with it)"
+    FAIL=$((FAIL + 1))
+else
+    TD="$(mktemp -d)"
+    NOW=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
+    OLD=$(date -u -d '-40 hours' +%Y-%m-%dT%H:%M:%S+00:00)
+    run_json() { # <name> <status> <finished> <problems> <paths> <calls> <backup>
+        printf '{"status":"%s","finished_at":"%s","problems":%s,"paths":%s,"vision_calls":%s,"vision_budget":3000,"latest_backup":%s,"duration_seconds":60}\n' \
+            "$2" "$3" "$4" "$5" "$6" "$7" > "$TD/$1.json"
+    }
+    P_OK='[{"path":"/a","status":"ok","files_found":100,"files_indexed":3,"files_errored":1,"files_deferred":0}]'
+    P_ERR='[{"path":"/a","status":"ok","files_found":100,"files_indexed":3,"files_errored":8,"files_deferred":0}]'
+    B_NOW="{\"file\":\"trove-x.db\",\"created_at\":\"$NOW\"}"
+    run_json ok ok "$NOW" '[]' "$P_OK" 10 "$B_NOW"
+    run_json stale ok "$OLD" '[]' "$P_OK" 10 "$B_NOW"
+    run_json failed failed "$NOW" '["/pcloud is not mounted"]' '[{"path":"/b","status":"aborted"}]' 0 null
+    run_json budget ok "$NOW" '[]' "$P_OK" 3000 "$B_NOW"
+    run_json errors ok "$NOW" '[]' "$P_ERR" 1 "$B_NOW"
+    run_json nobackup ok "$NOW" '[]' "$P_OK" 1 null
+    echo 'not json' > "$TD/junk.json"
+    expect "clean recent run is OK" 0 "^TROVE RUN OK - finished 0.0h ago: 100 files, 3 indexed, 1 errored, 10 vision calls \\| age_hours=" any -- "$TR" "$TD/ok.json"
+    expect "stale run is CRITICAL" 2 "^TROVE RUN CRITICAL - last index run finished 40.0h ago" any -- "$TR" "$TD/stale.json"
+    expect "failed run names its problems" 2 "^TROVE RUN CRITICAL - last index run failed: /pcloud is not mounted; /b aborted" any -- "$TR" "$TD/failed.json"
+    expect "spent budget is WARNING" 1 "^TROVE RUN WARNING - vision budget of 3000 calls spent" any -- "$TR" "$TD/budget.json"
+    expect "error rate over 5% is WARNING" 1 "^TROVE RUN WARNING - 8 of 100 files failed" any -- "$TR" "$TD/errors.json"
+    expect "no backup recorded is WARNING" 1 "^TROVE RUN WARNING - no database backup recorded" any -- "$TR" "$TD/nobackup.json"
+    expect "missing summary is CRITICAL" 2 "^TROVE RUN CRITICAL - no run summary" any -- "$TR" "$TD/nope.json"
+    expect "invalid JSON is UNKNOWN" 3 "^TROVE RUN UNKNOWN - " any -- "$TR" "$TD/junk.json"
+    expect "quote in path rejected" 3 "^TROVE RUN UNKNOWN - invalid summary path" any -- "$TR" "$TD/x');--.json"
+    rm -rf "$TD"
+fi
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
