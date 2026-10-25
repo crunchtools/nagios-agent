@@ -398,3 +398,9 @@ check = "copy_paste_detection"
 path = "rootfs/usr/local/nagios/libexec/check_hermes_platforms.py"
 justification = "Each Hermes probe is sent alone into the Kagetora container by check_hermes_exec.sh and runs with the standard library only, so the two probes cannot share a module; their check()/main() shapes match because both follow the Nagios plugin contract."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_trove_run.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"

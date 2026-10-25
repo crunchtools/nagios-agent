@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-10-25
+
+### Added
+
+- `check_trove_run.sh` (RT #1542): reads the summary mcp-trove 0.10+ writes
+  after each nightly `--index` run. CRITICAL when it is missing, over 36h old
+  or its status is not `ok` (aborted path, unmounted or hung source, backup or
+  quick_check failure), naming the problem; WARNING when over 5% of files
+  failed, the vision budget was spent or no recent backup is recorded. sqlite3
+  parses the JSON in memory, since the image has no jq or python. `:5666`
+  pool, as `check_trove_run`; service `Index run` in
+  `deploy/nagios/mcp-trove.cfg`.
+
 ## [6.2.0] - 2026-10-24
 
 ### Added
