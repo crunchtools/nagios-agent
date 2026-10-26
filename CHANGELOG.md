@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-10-26
+
+### Added
+
+- `check_deploy_drift.sh` and the Deploy drift service: WARNING when a running
+  quay.io/crunchtools container is "unmanaged" (no `io.containers.autoupdate`
+  label, so releases never land) or "stale" (running digest behind its Quay
+  tag past a 30h grace, so auto-update is not applying). Registry drift checks
+  that a release reached the registries; this checks that it reached lotor.
+  On first run it found mcp-systemd, mcp-podman, mcp-notebooklm and postfix
+  unmanaged.
+
 ## [6.4.1] - 2026-10-26
 
 ### Fixed

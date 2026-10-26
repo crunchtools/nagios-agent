@@ -462,6 +462,36 @@ else
     rm -rf "$TD"
 fi
 
+echo "=== check_deploy_drift ==="
+# The plugin greps fields out of the socket JSON, so one stub body serves both
+# the container list (Id) and the per-container inspect (the rest).
+DD="$LIBEXEC/check_deploy_drift.sh"
+ID=$(printf 'a%.0s' $(seq 64))
+OLD_TS=$(( $(date +%s) - 40 * 3600 ))
+ctr() { # <image-ref> <autoupdate> <digest>
+    printf '{"Id":"%s","Name":"svc","ImageName":"%s","ImageDigest":"%s","Config":{"Labels":{"io.containers.autoupdate":"%s"}}}' \
+        "$ID" "$1" "$3" "$2"
+}
+quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}]}' "$1" "$2"; }
+LATEST=quay.io/crunchtools/svc:latest
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") \
+    expect "running digest matches Quay is OK" 0 "^DEPLOY DRIFT OK - 1/1 " any -- "$DD"
+STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
+    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale\. unmanaged \(no autoupdate label\): svc" any -- "$DD"
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" any -- "$DD"
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$(date +%s)") \
+    expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " any -- "$DD"
+STUB_SOCK=$(ctr quay.io/crunchtools/svc@sha256:aa "" sha256:aa) \
+    expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" any -- "$DD"
+STUB_SOCK=$(ctr ghcr.io/other/svc:latest "" sha256:aa) \
+    expect "third-party image is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " any -- "$DD"
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
+    expect "Quay unreadable is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" any -- "$DD"
+STUB_SOCK_RC=7 \
+    expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" any -- "$DD"
+expect "non-numeric grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - grace_hours" any -- "$DD" soon
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
