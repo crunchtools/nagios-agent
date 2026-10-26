@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.4.1] - 2026-10-26
+
+### Fixed
+
+- `registry-images.conf`: the openclaw image maps to the `openclaw` repo again.
+  The takeda seat rename changed its first field, which is the GitHub repo, to
+  `takeda`, a repo that does not exist, so Registry drift went UNKNOWN.
+- Nightly Dump Freshness no longer watches data-collector's `collector.db`. The
+  collection was a six-run Hermes job that ended 2026-10-22, so the database
+  stops changing by design and the check went CRITICAL two days later.
+
 ## [6.4.0] - 2026-10-25
 
 ### Added

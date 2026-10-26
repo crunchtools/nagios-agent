@@ -8,9 +8,10 @@
 #   rt.fatherlinux.com       rt4.sql                    nightly
 #   postiz.crunchtools.com   postiz-*.sql.gz            nightly
 #
-# data-collector.crunchtools.com is not a dump but is the same question: a daily
-# timer writes one file, collector.db, and every run touches it. A run that
-# fails shows as a failed unit; a timer that never fires shows only here.
+# data-collector.crunchtools.com was watched here too until 6.4.1. Its collection
+# was finite: a Hermes job set to six runs (2026-10-17 to 10-22), after which
+# collector.db stops changing by design and read as permanently stale. Put its
+# sentinel back if a collection runs on a schedule again.
 #
 # check_backup_freshness.sh already watches the pCloud copies, but pCloud only
 # refreshes on the Saturday sync, so a nightly job that dies mid-week is invisible
@@ -48,7 +49,6 @@ learn_wiki|learn.fatherlinux.com/data/backups|my_wiki.sql|100000000
 learn_export|learn.fatherlinux.com/data/backups|export.xml|100000000
 rt|rt.fatherlinux.com/data/backups|rt4.sql|15000000
 postiz|postiz.crunchtools.com/data/backups|postiz-*.sql.gz|50000
-data_collector|data-collector.crunchtools.com/data|collector.db|100000
 "
 
 emit() { printf 'NDUMP %s\n' "$1"; }
