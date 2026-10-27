@@ -208,11 +208,17 @@ JOBS=${REGISTRY_DRIFT_JOBS:-8}
 : > "$TMP/results"
 timeout "$BUDGET" xargs -P "$JOBS" -L1 bash -c 'check_one "$@"' _ < "$TMP/images" >> "$TMP/results" 2>/dev/null 9>&-
 
+# Index the workers' lines by image once: "<kind> <value> <since>".
+declare -A answer=()
+while read -r img rest; do
+    [ -n "$img" ] && [ -z "${answer[$img]:-}" ] && answer[$img]=$rest
+done < "$TMP/results"
+
 {
     echo "RDRIFT generated=$START elapsed=$(( $(date +%s) - START ))"
     while read -r _ img _; do
         [[ $img =~ ^[A-Za-z0-9._-]+$ ]] || continue
-        read -r _ kind value since < <(awk -v i="$img" '$1 == i { print; exit }' "$TMP/results")
+        read -r kind value since <<< "${answer[$img]:-}"
         [ -n "${kind:-}" ] || { kind=UNKNOWN; value="$img(budget)"; since=""; }
         line="RDRIFT item=$img seen=$START kind=$kind${value:+ value=$value}${since:+ since=$since}"
         if [ "$kind" = UNKNOWN ]; then

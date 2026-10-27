@@ -29,9 +29,11 @@ EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 
 # cl_lock <name>: take this collector's lock or exit. Exits 0 when another run
 # holds it (that run will write the file) and 3 when the state dir is unusable.
+# The detached exec discards stderr, so the message is for a run by hand; the
+# check shows the failure as a status file going stale.
 cl_lock() {
-    mkdir -p "$STATE_DIR" || exit 3
-    exec 9>"$STATE_DIR/.$1.lock" || exit 3
+    mkdir -p "$STATE_DIR" || { echo "cl_lock: cannot create state dir $STATE_DIR" >&2; exit 3; }
+    exec 9>"$STATE_DIR/.$1.lock" || { echo "cl_lock: cannot open lock $STATE_DIR/.$1.lock" >&2; exit 3; }
     flock -n 9 || exit 0
 }
 
