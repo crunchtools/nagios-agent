@@ -168,16 +168,46 @@ STUB_INSPECT='{"ExitCode":0}' expect "empty stream gives empty output" 0 "^$" an
 STUB_CREATE='{"cause":"no such container"}' STUB_INSPECT='' expect "exec that cannot be created exits 3" 3 "EXEC_ERROR: Cannot create exec" any -- px ctr true
 rm -rf "$XSTUBS"
 
+echo "=== backup freshness: collector, status file, kick ==="
+# Both backup checks only read the status file backup-freshness-collect.sh
+# writes; the collector is driven here directly with a stubbed rclone. The
+# plugins' detached kick goes through the podman_exec stub, whose mark file
+# says whether a collector run was started and with which arguments.
+COL="$LIBEXEC/backup-freshness-collect.sh"
+BSTATE="$(mktemp -d)"
+KSTUBS="$(mktemp -d)"
+cat > "$KSTUBS/exec" <<'STUB'
+#!/bin/bash
+echo "$*" > "$STUB_EXEC_MARK"
+exit "${STUB_KICK_RC:-0}"
+STUB
+chmod +x "$KSTUBS/exec"
+export STATE_DIR="$BSTATE"
+# check <plugin>: run a backup plugin against $BSTATE, kicking through the stub
+chk() { EXEC="$KSTUBS/exec" COLLECT=/collector "$@"; }
+age_file() { # <file> <secs>: rewrite generated= (and seen=) as <secs> ago
+    local t=$(( $(date +%s) - $2 ))
+    sed -i -E "s/generated=[0-9]+/generated=$t/; s/seen=[0-9]+/seen=$t/g" "$1"
+}
+kicked() { # <desc> <yes|no>
+    local ran=no; [ -e "$STUB_EXEC_MARK" ] && ran=yes
+    if [ "$ran" = "$2" ]; then echo "  PASS: $1"; PASS=$((PASS + 1))
+    else echo "  FAIL: $1 (kicked=$ran)"; FAIL=$((FAIL + 1)); fi
+}
+
 echo "=== check_personal_backup_freshness ==="
 PB="$LIBEXEC/check_personal_backup_freshness.sh"
+PSTAT="$BSTATE/personal-backup-freshness.status"
 RSTUBS="$(mktemp -d)"
 cat > "$RSTUBS/rclone" <<'STUB'
 #!/bin/bash
+[ -n "${STUB_SLOW:-}" ] && exec sleep 30
 printf '%s' "${STUB_MARKERS:-}"
 exit "${STUB_RCLONE_RC:-0}"
 STUB
 chmod +x "$RSTUBS/rclone"
-pb() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$PB"; }
+pcol() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$COL" personal; }
+pb() { rm -f "$PSTAT"; pcol; chk "$PB"; }
 # markers <weekly age days> <monthly age days> [rclone exit]: all twelve markers
 markers() {
     local now; now=$(date +%s)
@@ -187,7 +217,7 @@ markers() {
         echo "Files|$d|Monthly-2|0|$((now - $2 * 86400))|0"
     done
 }
-STUB_MARKERS="$(markers 2 40)" expect "all twelve fresh" 0 "OK - Weekly-1 4/4 fresh \\(worst 2d\\); Monthly-1 4/4 .*problems=0" any -- pb
+STUB_MARKERS="$(markers 2 40)" expect "all twelve fresh" 0 "OK - Weekly-1 4/4 fresh \\(worst 2d\\); Monthly-1 4/4 .*problems=0" no -- pb
 STUB_MARKERS="$(markers 10 40)" expect "weekly past warn" 1 "WARNING .*Documents/Weekly-1: aging 10d" any -- pb
 STUB_MARKERS="$(markers 16 40)" expect "weekly past crit" 2 "CRITICAL .*Projects/Weekly-1: STALE 16d" any -- pb
 STUB_MARKERS="$(markers 2 69)" expect "monthly just inside warn" 0 "OK .*Monthly-2 4/4" any -- pb
@@ -200,12 +230,31 @@ STUB_MARKERS="$(markers 2 40 | sed 's/^Files|Autosync|Weekly-1|.*/Files|Autosync
 STUB_MARKERS="" STUB_RCLONE_RC=3 expect "no markers at all" 2 "CRITICAL - cannot read markers .*rclone exit 3" any -- pb
 STUB_MARKERS="" expect "empty folder" 2 "CRITICAL - cannot read markers .*rclone exit 0" any -- pb
 STUB_MARKERS="$(markers 2 40)" STUB_RCLONE_RC=1 expect "failed read is not judged on partial output" 2 "CRITICAL - cannot read markers .*rclone exit 1" any -- pb
-STUB_MARKERS="" STUB_RCLONE_RC=124 expect "timeout is UNKNOWN" 3 "UNKNOWN - timed out" any -- pb
-RCLONE=/nonexistent expect "rclone not mounted is UNKNOWN" 3 "UNKNOWN .*not mounted" any -- "$PB"
+STUB_MARKERS="" STUB_RCLONE_RC=124 expect "first-ever read timing out is UNKNOWN" 3 "UNKNOWN - collector timed out" any -- pb
+rm -f "$PSTAT"; STUB_MARKERS="$(markers 2 40)" pcol
+STUB_MARKERS="" STUB_RCLONE_RC=124 pcol
+expect "timeout keeps the last markers" 0 "OK - Weekly-1 4/4 fresh" no -- chk "$PB"
+grep -q 'lastfail=timeout' "$PSTAT" && { echo "  PASS: timeout is recorded as lastfail"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: no lastfail=timeout in status"; FAIL=$((FAIL + 1)); }
+rm -f "$PSTAT"; STUB_MARKERS="$(markers 2 40)" pcol; age_file "$PSTAT" 1500
+expect "status past REFRESH is still judged" 0 "OK - Weekly-1 4/4" any -- chk "$PB"
+kicked "status past REFRESH starts the collector" yes
+age_file "$PSTAT" 7300
+expect "status older than 2h is UNKNOWN collector stale" 3 "^PERSONAL BACKUPS UNKNOWN - collector stale: last collection 2h" yes -- chk "$PB"
+rm -f "$PSTAT"
+expect "missing status file is UNKNOWN and starts the collector" 3 "^PERSONAL BACKUPS UNKNOWN - collector stale: no status file .*collector started" yes -- chk "$PB"
+grep -q -- '--detach nagios-agent.crunchtools.com /collector personal' "$STUB_EXEC_MARK" \
+    && { echo "  PASS: kick is a detached exec of the personal collector"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+STUB_KICK_RC=3 expect "failed kick is reported" 3 "collector could not be started" yes -- chk "$PB"
+RCLONE=/nonexistent CONF=/dev/null expect "collector without rclone exits 3, writes nothing" 3 "not mounted" any -- "$COL" personal
+[ -e "$PSTAT" ] && { echo "  FAIL: collector wrote a status without rclone"; FAIL=$((FAIL + 1)); }
+expect "collector rejects an unknown mode" 3 "usage" any -- "$COL" bogus
 rm -rf "$RSTUBS"
 
 echo "=== check_backup_freshness ==="
 BF="$LIBEXEC/check_backup_freshness.sh"
+BSTAT="$BSTATE/backup-freshness.status"
 BSTUBS="$(mktemp -d)"
 # rclone stub keyed on the listed path (its last argument): STUB_SLOW hangs,
 # STUB_FAIL exits STUB_FAIL_RC, STUB_GONE exits 3 like a missing directory;
@@ -219,35 +268,94 @@ hit() { [ -n "$1" ] && [[ "$p" == *"$1"* ]]; }
 hit "${STUB_SLOW:-}" && exec sleep 30
 hit "${STUB_FAIL:-}" && { echo "Failed to lsf: pcloud said no" >&2; exit "${STUB_FAIL_RC:-1}"; }
 hit "${STUB_GONE:-}" && { echo "directory not found" >&2; exit 3; }
-# An hour of slack: probes in later waves run seconds after the plugin's START.
+# An hour of slack: probes in later waves run seconds after the collector's START.
 echo "$(date -d "@$(( $(date +%s) - ${STUB_AGE:-1} * 86400 - 3600 ))" '+%Y-%m-%d %H:%M:%S')|${STUB_SIZE:-999999999}"
 STUB
 chmod +x "$BSTUBS/rclone"
 export STUB_CALLS="$BSTUBS/calls"
-bf() { : > "$STUB_CALLS"; RCLONE="$BSTUBS/rclone" CONF=/dev/null "$BF"; }
+scol() { : > "$STUB_CALLS"; RCLONE="$BSTUBS/rclone" CONF=/dev/null "$COL" servers; }
+bf() { rm -f "$BSTAT"; scol; chk "$BF"; }
 # within <secs> <desc>: the previous expect finished inside <secs> wall time
 within() {
     if [ $((SECONDS - T0)) -le "$1" ]; then echo "  PASS: $2"; PASS=$((PASS + 1))
     else echo "  FAIL: $2 (took $((SECONDS - T0))s)"; FAIL=$((FAIL + 1)); fi
 }
-expect "all fresh" 0 "^BACKUPS OK - Weekly-1 15/15 fresh \\(worst 1d\\); Monthly-1 1d; Monthly-2 1d \\|.* stale=0 unknown=0 elapsed=" any -- bf
+expect "all fresh" 0 "^BACKUPS OK - Weekly-1 15/15 fresh \\(worst 1d\\); Monthly-1 1d; Monthly-2 1d \\|.* stale=0 unknown=0 elapsed=[0-9]+s collected_age=" no -- bf
 STUB_AGE=10 expect "weekly past warn" 1 "^BACKUPS WARNING - [a-z-]+: aging 10d \\(warn 9d\\) \\[\\+14 more\\]; Weekly-1 0/15" any -- bf
 STUB_AGE=20 expect "weekly past crit" 2 "^BACKUPS CRITICAL - [a-z-]+: STALE 20d \\(crit 16d\\)" any -- bf
 STUB_GONE=rt4.sql expect "missing dump is named on line 1" 2 "^BACKUPS CRITICAL - rt-db: MISSING \\(Weekly-1/rt.fatherlinux.com/data/backups/rt4.sql\\); Weekly-1 14/15" any -- bf
-STUB_FAIL=rt4.sql STUB_FAIL_RC=5 expect "rclone error is UNKNOWN, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: RCLONE ERROR \\(exit 5\\): Failed to lsf: pcloud said no; .* unknown=1 " any -- bf
+STUB_FAIL=rt4.sql STUB_FAIL_RC=5 expect "first-ever rclone error is UNKNOWN, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: RCLONE ERROR \\(exit 5\\): Failed to lsf: pcloud said no; .* unknown=1 " any -- bf
 if [ "$(grep -c rt4.sql "$STUB_CALLS")" = 2 ]; then echo "  PASS: rclone error is retried once"; PASS=$((PASS + 1))
 else echo "  FAIL: rclone error retried $(grep -c rt4.sql "$STUB_CALLS") times"; FAIL=$((FAIL + 1)); fi
 T0=$SECONDS
-STUB_SLOW=rt4.sql PROBE_T=1 BUDGET=4 expect "slow listing is UNKNOWN TIMEOUT, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: TIMEOUT after 1s" any -- bf
-within 6 "timed-out listing stays inside the budget"
+STUB_SLOW=rt4.sql PROBE_T=1 BUDGET=4 expect "first-ever slow listing is UNKNOWN TIMEOUT, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: TIMEOUT after 1s" any -- bf
+within 6 "timed-out listing stays inside the collector budget"
 STUB_GONE=rt4.sql STUB_SLOW=feeds.db PROBE_T=1 BUDGET=8 \
     expect "MISSING outranks TIMEOUT" 2 "^BACKUPS CRITICAL - rt-db: MISSING .*\\[\\+1 more\\].*unknown=1 .*"$'\n'"rt-db: MISSING.*"$'\n'"mcp-feeds-db: TIMEOUT" any -- bf
 STUB_SIZE=10 expect "shrunken dump" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: TOO SMALL 10B" any -- bf
 T0=$SECONDS
 STUB_SLOW=lotor PROBE_T=2 BUDGET=3 expect "exhausted deadline leaves sentinels UNCHECKED" 3 "^BACKUPS UNKNOWN - [a-z0-9-]+: TIMEOUT .*, 19 unchecked;.*UNCHECKED \\(out of time\\)" any -- bf
 within 4 "exhausted deadline does not overrun"
-RCLONE=/nonexistent expect "rclone not mounted is UNKNOWN" 3 "UNKNOWN .*not mounted" any -- "$BF"
-rm -rf "$BSTUBS"
+# The live-read failure this release exists for: a slow listing after a good run.
+rm -f "$BSTAT"; scol
+STUB_SLOW=crunchtools.com/backups PROBE_T=1 BUDGET=6 scol
+expect "slow listing keeps the last real answer" 0 "^BACKUPS OK - Weekly-1 15/15 fresh" no -- chk "$BF"
+sed -i -E "/item=monthly1-crunchtools /s/seen=[0-9]+/seen=$(( $(date +%s) - 7300 ))/" "$BSTAT"
+expect "a sentinel unread for 2h is UNKNOWN by name" 3 "^BACKUPS UNKNOWN - monthly1-crunchtools: not read from pCloud for 2h" any -- chk "$BF"
+rm -f "$BSTAT"; STUB_GONE=rt4.sql scol
+sed -i -E "/item=rt-db /s/seen=[0-9]+/seen=$(( $(date +%s) - 7300 ))/" "$BSTAT"
+expect "an old CRITICAL stays CRITICAL" 2 "^BACKUPS CRITICAL - rt-db: MISSING" any -- chk "$BF"
+rm -f "$BSTAT"; STUB_AGE=20 scol; age_file "$BSTAT" 600
+expect "stale backup in a fresh status file is CRITICAL" 2 "^BACKUPS CRITICAL - [a-z-]+: STALE 20d" no -- chk "$BF"
+rm -f "$BSTAT"; scol; age_file "$BSTAT" 1500
+expect "status past REFRESH is still judged and starts the collector" 0 "^BACKUPS OK" yes -- chk "$BF"
+age_file "$BSTAT" 7300
+expect "status older than 2h is UNKNOWN collector stale" 3 "^BACKUPS UNKNOWN - collector stale: last collection 2h" yes -- chk "$BF"
+rm -f "$BSTAT"
+expect "missing status file is UNKNOWN and starts the collector" 3 "^BACKUPS UNKNOWN - collector stale: no status file .*collector started" yes -- chk "$BF"
+grep -q -- '--detach nagios-agent.crunchtools.com /collector servers' "$STUB_EXEC_MARK" \
+    && { echo "  PASS: kick is a detached exec of the servers collector"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+printf 'BKUP generated=%s elapsed=1\nBKUP item=rt-db rot=Weekly-1' "$(date +%s)" > "$BSTAT"
+expect "truncated status file is UNKNOWN" 3 "^BACKUPS UNKNOWN - collector stale: .* truncated" yes -- chk "$BF"
+# A second collector start while one runs must not race it for the file.
+rm -f "$BSTAT"
+( flock 9; sleep 3 ) 9>"$BSTATE/.servers.lock" &
+sleep 0.5
+expect "a second collector run exits while the first holds the lock" 0 "^$" any -- scol
+[ -e "$BSTAT" ] && { echo "  FAIL: locked-out run wrote the status file"; FAIL=$((FAIL + 1)); }
+wait
+scol
+[ "$(stat -c %a "$BSTAT")" = 644 ] && ! ls "$BSTATE"/*.tmp.* >/dev/null 2>&1 \
+    && { echo "  PASS: status published 0644 with no temp file left"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: status mode $(stat -c %a "$BSTAT") or temp file left"; FAIL=$((FAIL + 1)); }
+rm -rf "$BSTUBS" "$BSTATE" "$KSTUBS"
+unset STATE_DIR
+
+echo "=== podman_exec --detach ==="
+DSTUBS="$(mktemp -d)"
+cat > "$DSTUBS/curl" <<'STUB'
+#!/bin/bash
+url="" data=""
+while [ $# -gt 0 ]; do
+    case "$1" in -d) data="$2"; shift ;; http://*) url="$1" ;; esac
+    shift
+done
+echo "$url $data" >> "$STUB_CURL_LOG"
+case "$url" in
+    */start) printf '%s' "${STUB_START_CODE:-200}" ;;
+    */exec) printf '{"Id":"abc123"}' ;;
+esac
+STUB
+chmod +x "$DSTUBS/curl"
+export STUB_CURL_LOG="$DSTUBS/log"
+pxd() { : > "$STUB_CURL_LOG"; PATH="$DSTUBS:$PATH" "$LIBEXEC/podman_exec.sh" --detach "$@"; }
+expect "detached start returns 0 with no output" 0 "^$" any -- pxd ctr /collector servers
+grep -q '"Detach":true' "$STUB_CURL_LOG" && grep -q '"AttachStdout":false' "$STUB_CURL_LOG" && ! grep -q '/json' "$STUB_CURL_LOG" \
+    && { echo "  PASS: detached exec does not attach or wait for an exit code"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: detached exec calls: $(cat "$STUB_CURL_LOG")"; FAIL=$((FAIL + 1)); }
+STUB_START_CODE=404 expect "rejected detached start exits 3" 3 "EXEC_ERROR: detached start .* HTTP 404" any -- pxd ctr /collector servers
+rm -rf "$DSTUBS"
 
 echo "=== check_hermes_exec ==="
 HX="$LIBEXEC/check_hermes_exec.sh"
@@ -491,6 +599,125 @@ STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
 STUB_SOCK_RC=7 \
     expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" any -- "$DD"
 expect "non-numeric grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - grace_hours" any -- "$DD" soon
+
+echo "=== check_git_drift (grace) ==="
+GD="$LIBEXEC/check_git_drift.sh"
+srvdrift() { # <dirty> <drift_since epoch> [extra lines]
+    printf 'SRVDRIFT generated=1\nSRVDRIFT dirty_files=%s\nSRVDRIFT unpushed=0\nSRVDRIFT drift_since=%s\nSRVDRIFT services=svc\n%sSRVDRIFT end=1\n' "$1" "$2" "${3:-}"
+}
+T=$(date +%s)
+gd() { EXEC="$STUBS/podman_exec.sh" "$GD"; }
+STUB_EXEC="$(srvdrift 0 0)" expect "clean tree is OK" 0 "^GIT DRIFT OK - /srv clean" yes -- gd
+STUB_EXEC="$(srvdrift 2 $((T - 7200)))" expect "2h of drift is within grace" 0 "^GIT DRIFT OK - drift 2h, within grace \\(warn after 4h\\): /srv out of sync" yes -- gd
+STUB_EXEC="$(srvdrift 2 $((T - 18000)))" expect "5h of drift is WARNING" 1 "^GIT DRIFT WARNING - /srv out of sync with git for 5h" yes -- gd
+STUB_EXEC="$(srvdrift 2 $((T - 90000)))" expect "25h of drift is CRITICAL" 2 "^GIT DRIFT CRITICAL - " yes -- gd
+STUB_EXEC="$(srvdrift 2 $((T - 7200)))" WARN=3600 expect "WARN env still overrides" 1 "^GIT DRIFT WARNING - " yes -- gd
+
+echo "=== check_unit_drift (grace) ==="
+UD="$LIBEXEC/check_unit_drift.sh"
+units() { # <mismatch> <unbacked> [unit_drift_since]
+    printf 'SRVDRIFT generated=1\nSRVDRIFT unit_mismatch=%s\nSRVDRIFT unit_unbacked=%s\nSRVDRIFT unit_list=a.service\n' "$1" "$2"
+    [ -n "${3:-}" ] && printf 'SRVDRIFT unit_drift_since=%s\n' "$3"
+    printf 'SRVDRIFT end=1\n'
+}
+ud() { EXEC="$STUBS/podman_exec.sh" "$UD"; }
+STUB_EXEC="$(units 0 0 0)" expect "matching units are OK" 0 "^UNIT DRIFT OK - every running unit matches" yes -- ud
+STUB_EXEC="$(units 1 0 $((T - 1800)))" expect "30m-old unit drift is within grace" 0 "^UNIT DRIFT OK - drift 30m, within grace \\(warn after 4h\\): 1 unit\\(s\\) differ from /srv \\(a.service\\)" yes -- ud
+STUB_EXEC="$(units 1 1 $((T - 18000)))" expect "5h-old unit drift is WARNING" 1 "^UNIT DRIFT WARNING - drift 5h: 1 unit\\(s\\) differ from /srv, 1 unit\\(s\\) have no /srv copy" yes -- ud
+STUB_EXEC="$(units 1 0)" expect "undated drift counts as aged" 1 "^UNIT DRIFT WARNING - drift 4h" yes -- ud
+STUB_EXEC="$(units 1 0 $((T - 1800)))" WARN=600 expect "WARN env overrides the grace" 1 "^UNIT DRIFT WARNING - drift 30m" yes -- ud
+
+echo "=== srv-drift-collect (unit_drift_since) ==="
+SC="$(mktemp -d)"
+mkdir -p "$SC/srv/a/config" "$SC/etc"; git init -q "$SC/srv"
+printf 'ExecStart=/srv/a\n' > "$SC/srv/a/config/a.service"
+printf 'ExecStart=/srv/a --changed\n' > "$SC/etc/a.service"
+printf 'ExecStart=/srv/b\n' > "$SC/etc/b.service"
+touch -d '@1000000000' "$SC/srv/a/config/a.service"; touch -d '@1000000500' "$SC/etc/a.service"
+touch -d '@1000000300' "$SC/etc/b.service"
+OUT=$(REPO="$SC/srv" UNITS="$SC/etc" "$LIBEXEC/srv-drift-collect.sh" 2>/dev/null)
+if [[ $OUT == *"unit_mismatch=1"* && $OUT == *"unit_unbacked=1"* && $OUT == *"unit_drift_since=1000000300"* ]]; then
+    echo "  PASS: oldest of (newer copy of each mismatch, /etc copy of each unbacked)"; PASS=$((PASS + 1))
+else
+    echo "  FAIL: collector unit dating: $(grep -E 'unit_|error' <<< "$OUT" | tr '\n' ' ')"; FAIL=$((FAIL + 1))
+fi
+rm -rf "$SC"
+
+echo "=== check_plugin_drift (grace) ==="
+PD="$LIBEXEC/check_plugin_drift.sh"
+PDD="$(mktemp -d)"; mkdir "$PDD/live" "$PDD/rel"
+for n in a b c; do echo "$n" > "$PDD/rel/check_$n.sh"; cp "$PDD/rel/check_$n.sh" "$PDD/live/"; done
+pd() { PLUGIN_DRIFT_LIVE="$PDD/live" PLUGIN_DRIFT_RELEASED="$PDD/rel" "$PD"; }
+expect "no drift is OK" 0 "^OK - all 3 plugins match" any -- pd
+echo changed > "$PDD/live/check_a.sh"
+expect "fresh edit is within grace" 0 "^PLUGIN DRIFT OK - drift 0m, within grace \\(warn after 4h\\): 1 differ .*modified\\(1\\): check_a.sh" any -- pd
+touch -d '5 hours ago' "$PDD/live/check_a.sh"
+expect "5h-old edit is WARNING" 1 "^PLUGIN DRIFT WARNING - drift 5h: 1 differ from the released image: modified\\(1\\): check_a.sh" any -- pd
+touch "$PDD/live/check_a.sh"; touch -d '2 minutes ago' "$PDD/live/check_a.sh"
+PLUGIN_DRIFT_WARN=60 expect "PLUGIN_DRIFT_WARN overrides the grace" 1 "^PLUGIN DRIFT WARNING - drift 2m" any -- pd
+cp "$PDD/rel/check_a.sh" "$PDD/live/"; rm "$PDD/live/check_b.sh"
+expect "fresh removal is within grace" 0 "^PLUGIN DRIFT OK - .*released-but-not-running\\(1\\): check_b.sh" any -- pd
+touch -d '6 hours ago' "$PDD/live"
+expect "old removal is WARNING, dated by the dir" 1 "^PLUGIN DRIFT WARNING - drift 6h: .*released-but-not-running\\(1\\)" any -- pd
+echo new > "$PDD/live/check_new.sh"; touch -d '6 hours ago' "$PDD/live"
+expect "one old item is enough to warn" 1 "^PLUGIN DRIFT WARNING - drift 6h: 2 differ" any -- pd
+rm -rf "$PDD"
+
+echo "=== check_registry_drift (grace) ==="
+RD="$LIBEXEC/check_registry_drift.sh"
+GSTUBS="$(mktemp -d)"
+cat > "$GSTUBS/git" <<'STUB'
+#!/bin/bash
+[ -n "${STUB_TAG:-}" ] && printf 'deadbeef\trefs/tags/v%s\n' "$STUB_TAG"
+exit 0
+STUB
+cat > "$GSTUBS/curl" <<'STUB'
+#!/bin/bash
+for a in "$@"; do
+    case "$a" in
+        --unix-socket) printf '%s' "${STUB_LOCAL:-[]}"; exit 0 ;;
+        */tag/*) printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
+        */token*) printf '{"token":"t"}'; exit 0 ;;
+        */tags/list*) printf '%s' "${STUB_GHCR:-}"; exit 0 ;;
+    esac
+done
+exit 22
+STUB
+chmod +x "$GSTUBS/git" "$GSTUBS/curl"
+echo "svc svc" > "$GSTUBS/images.conf"
+python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$GSTUBS/sock"
+rd() { PATH="$GSTUBS:$PATH" REGISTRY_DRIFT_CONF="$GSTUBS/images.conf" REGISTRY_DRIFT_SOCK="$GSTUBS/sock" "$RD"; }
+quayj() { # <start_ts> [name]: a tag listing shaped like Quay's, nested object included
+    printf '{"tags": [{"name": "%s", "reversion": false, "start_ts": %s, "child_manifests_presence": {"sha256:aa": true}}, {"name": "latest", "start_ts": 1}]}' "${2:-1.2.0}" "$1"
+}
+GH_HAS='{"name":"crunchtools/svc","tags":["1.2.0","latest"]}'
+GH_NOT='{"name":"crunchtools/svc","tags":["1.1.0","latest"]}'
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" \
+    expect "both registries carry the tag" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" \
+    expect "GHCR lagging a 1h-old Quay push is within grace" 0 "^REGISTRY DRIFT OK - drift 1h, within grace \\(warn after 4h\\): 1/1 .*in grace: svc:1.2.0\\[ghcr\\]" any -- rd
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 18000)))" STUB_GHCR="$GH_NOT" \
+    expect "GHCR lagging a 5h-old Quay push is WARNING" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" any -- rd
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" REGISTRY_DRIFT_WARN=600 \
+    expect "REGISTRY_DRIFT_WARN overrides the grace" 1 "^REGISTRY DRIFT WARNING - " any -- rd
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" STUB_GHCR="$GH_HAS" \
+    expect "missing from Quay with no local image warns at once" 1 "^REGISTRY DRIFT WARNING - .*missing: svc:1.2.0\\[quay\\]" any -- rd
+if command -v sqlite3 >/dev/null; then
+    STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" STUB_GHCR="$GH_HAS" \
+        STUB_LOCAL="[{\"Id\":\"x\",\"RepoTags\":[\"ghcr.io/crunchtools/svc:1.2.0\"],\"Created\":$((T - 1200)),\"Labels\":{\"a\":\"b\"}}]" \
+        expect "missing from Quay, dated by a local image, is within grace" 0 "^REGISTRY DRIFT OK - drift 20m, within grace" any -- rd
+fi
+STUB_TAG="" STUB_QUAY="$(quayj 1)" STUB_GHCR="$GH_HAS" \
+    expect "untagged repo always warns" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 1 untagged" any -- rd
+rm -rf "$GSTUBS"
+
+echo "=== check_container_postgres ==="
+PG="$LIBEXEC/check_container_postgres.sh"
+STUB_EXEC='exec: "pg_isready": executable file not found in $PATH' STUB_EXEC_RC=127 \
+    expect "pg_isready missing is UNKNOWN, not an outage" 3 "^UNKNOWN - pg_isready missing from image ctr$" yes -- "$PG" ctr
+STUB_EXEC='localhost:5432 - no response' STUB_EXEC_RC=2 \
+    expect "no response is still CRITICAL" 2 "^CRITICAL - PostgreSQL in ctr not accepting connections" yes -- "$PG" ctr
+STUB_EXEC='7' STUB_EXEC_RC=0 expect "accepting with few connections is OK" 0 "^OK - PostgreSQL in ctr: 7 active" yes -- "$PG" ctr
 
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then

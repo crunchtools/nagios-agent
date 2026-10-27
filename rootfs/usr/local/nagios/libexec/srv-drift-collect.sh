@@ -94,6 +94,16 @@ fi
 unit_mismatch=0
 unit_unbacked=0
 unit_list=""
+# Age of the unit drift, for check_unit_drift.sh's grace window (7.0.0). Each
+# drifted unit is dated by the newer mtime of its two copies, which is when
+# they last stopped matching; an unbacked unit by its /etc copy. The oldest of
+# those is the age of the drift. Stateless, like drift_since above.
+unit_drift_since=0
+note_unit() { # <mtime>
+  [ -n "$1" ] || return 0
+  { [ "$unit_drift_since" -eq 0 ] || [ "$1" -lt "$unit_drift_since" ]; } && unit_drift_since=$1
+  return 0
+}
 
 for src in "$REPO"/*/config/*.service "$REPO"/*/config/*.timer; do
   [ -f "$src" ] || continue
@@ -102,6 +112,8 @@ for src in "$REPO"/*/config/*.service "$REPO"/*/config/*.timer; do
   [ -f "$inst" ] || continue
   cmp -s "$src" "$inst" && continue
   unit_mismatch=$(( unit_mismatch + 1 ))
+  ms=$(stat -c %Y -- "$src" 2>/dev/null || echo 0); mi=$(stat -c %Y -- "$inst" 2>/dev/null || echo 0)
+  note_unit "$(( ms > mi ? ms : mi ))"
   unit_list="${unit_list:+$unit_list,}$base"
 done
 
@@ -113,6 +125,7 @@ for inst in "$UNITS"/*.service "$UNITS"/*.timer; do
   for c in "$REPO"/*/config/"$base"; do [ -f "$c" ] && found=1; done
   [ "$found" -eq 1 ] && continue
   unit_unbacked=$(( unit_unbacked + 1 ))
+  note_unit "$(stat -c %Y -- "$inst" 2>/dev/null)"
   unit_list="${unit_list:+$unit_list,}$base"
 done
 
@@ -127,4 +140,5 @@ emit services      "$services"
 emit unit_mismatch "$unit_mismatch"
 emit unit_unbacked "$unit_unbacked"
 emit unit_list     "$unit_list"
+emit unit_drift_since "$unit_drift_since"
 emit end 1

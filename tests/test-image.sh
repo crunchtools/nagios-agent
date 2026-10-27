@@ -116,6 +116,14 @@ check "check_nightly_dump reports UNKNOWN with no podman socket" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
     '/usr/local/nagios/libexec/check_nightly_dump.sh; [ $? -eq 3 ]'
 
+# 7.0.0. The image carries the state dir and flock, and with no status file and
+# no socket the backup check must be UNKNOWN "collector stale", never a verdict.
+check "backup state dir exists and flock is installed" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c 'test -d /var/lib/nagios-agent && command -v flock'
+check "check_backup_freshness is UNKNOWN collector stale with no status file" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    '/usr/local/nagios/libexec/check_backup_freshness.sh | grep -q "collector stale"'
+
 echo ""
 echo "=== Runtime tests ==="
 

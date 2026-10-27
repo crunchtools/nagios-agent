@@ -43,7 +43,9 @@ daemon is the sole witness to its own death.
 6. **Backup freshness** — the weekly pCloud dumps by age and size floor
    (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
    `crunchtools/pbs` writes after each sync
-   (`check_personal_backup_freshness.sh`), and the nightly in-container dumps read on disk
+   (`check_personal_backup_freshness.sh`), both judged from a status file that
+   `backup-freshness-collect.sh` writes to `/var/lib/nagios-agent` with a 120s
+   pCloud budget, started detached by the checks themselves, and the nightly in-container dumps read on disk
    under `/var/srv` before they ever reach pCloud (`check_nightly_dump.sh` +
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service
@@ -54,7 +56,9 @@ daemon is the sole witness to its own death.
    repo that also carries it (`check_config_drift.sh`). The third exists
    because the first two are single-repo by construction: a file with two git
    homes looks clean from inside either one, right up until someone syncs from
-   the wrong one and production changes.
+   the wrong one and production changes. Git, unit, plugin and registry drift
+   stay OK for 4h after the drift starts, dated from file mtimes or the
+   registry push, so a deploy in progress is not an alert.
 
 ## Quick start
 
@@ -65,6 +69,7 @@ podman run -d --name nagios-agent.crunchtools.com \
   --network=host --pid=host --privileged --memory=1g --memory-swap=1g \
   -v /srv/<service>/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z \
   -v /srv/<service>/config/scripts:/usr/local/nagios/libexec:ro,Z \
+  -v /srv/<service>/data:/var/lib/nagios-agent:Z \
   -v /run/podman/podman.sock:/run/podman/podman.sock \
   quay.io/crunchtools/nagios-agent:latest
 ```

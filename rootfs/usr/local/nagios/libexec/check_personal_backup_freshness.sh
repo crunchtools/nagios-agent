@@ -10,36 +10,74 @@
 #   pcloud:Backups/Rotations/Files.<directory>.<rotation>
 #   Files|<directory>|<rotation>|<start epoch>|<end epoch>|<rclone exit>
 #
-# One `rclone cat` of the folder reads every marker in a single process. That
-# is the budget: check_backup_freshness already takes ~10s of the agent's 15s
-# command_timeout with one rclone per sentinel, so this stays a separate check.
+# backup-freshness-collect.sh reads every marker with one `rclone cat` and
+# writes them to a status file (7.0.0). This plugin only reads that file: the
+# live read inside NRPE's 15s command_timeout kept failing with "timed out
+# reading pcloud:Backups/Rotations" while the backups were fine. When the file
+# is missing or older than REFRESH (20m) the plugin starts the collector
+# detached through `podman_exec.sh --detach` and judges the previous run's
+# file, so the Nagios check_interval is the clock.
 #
 # A rotation is CRITICAL when its marker is missing or unreadable, when the
 # last run's rclone exit was not 0, or when it is past crit. A failed run still
-# writes its marker, so it shows here on the next check, not days later.
+# writes its marker, so it shows here on the next collection, not days later.
+# CRITICAL too when the collector could not read the folder at all (any rclone
+# failure other than a timeout, after one retry), as before the split.
 #
-# rclone and its config are ro-mounted from the host into the agent container,
-# as for check_backup_freshness; runs unprivileged as the nrpe user.
+# UNKNOWN only for "collector stale": no status file, or one older than STALE
+# (2h), or markers pCloud last answered with more than STALE ago (the
+# collector keeps the previous markers through a timeout).
 
-RCLONE=${RCLONE:-/usr/local/bin/rclone}
-CONF=${CONF:-/etc/nagios/rclone.conf}
-BASE=${BASE:-pcloud:Backups/Rotations}
+STATE_DIR=${STATE_DIR:-/var/lib/nagios-agent}
+STATUS=${STATUS:-$STATE_DIR/personal-backup-freshness.status}
+EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/backup-freshness-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
+REFRESH=${REFRESH:-1200}
+STALE=${STALE:-7200}
+BASE=pcloud:Backups/Rotations
 DIRECTORIES="Documents Downloads Autosync Projects"
 NOW=$(date +%s)
-
-[ -x "$RCLONE" ] || { echo "UNKNOWN - $RCLONE not mounted into agent container"; exit 3; }
-[ -r "$CONF" ]   || { echo "UNKNOWN - $CONF not readable"; exit 3; }
 
 W_WARN=9  W_CRIT=16    # days — Weekly-1 runs Fridays 06:00
 M_WARN=70 M_CRIT=100   # days — each monthly rotation fires every other month
 
-# Measured 2.4s on lotor for twelve markers; 8s matches the per-probe timeout
-# in check_backup_freshness and leaves half of command_timeout spare.
-markers=$(timeout 8 "$RCLONE" --config "$CONF" cat "$BASE" 2>/dev/null)
-rc=$?
-if [ "$rc" -eq 124 ]; then
-    echo "UNKNOWN - timed out reading $BASE"; exit 3
+kick() { "$EXEC" --detach "$CONTAINER" "$COLLECT" personal >/dev/null 2>&1; }
+hm() { echo "$(( $1 / 3600 ))h$(( $1 % 3600 / 60 ))m"; }
+
+if [ ! -r "$STATUS" ]; then
+    kick && started="collector started" || started="collector could not be started"
+    echo "PERSONAL BACKUPS UNKNOWN - collector stale: no status file at $STATUS ($started)"
+    exit 3
 fi
+raw=$(cat "$STATUS")
+head_line=$(grep -m1 -E '^PBKUP generated=[0-9]+ seen=[0-9]+ rc=[0-9]+' <<< "$raw")
+if [ -z "$head_line" ] || ! grep -qx 'PBKUP end=1' <<< "$raw"; then
+    kick
+    echo "PERSONAL BACKUPS UNKNOWN - collector stale: $STATUS is truncated or unrecognised"
+    exit 3
+fi
+generated=$(grep -oE 'generated=[0-9]+' <<< "$head_line" | cut -d= -f2)
+seen=$(grep -oE 'seen=[0-9]+' <<< "$head_line" | cut -d= -f2)
+rc=$(grep -oE ' rc=[0-9]+' <<< "$head_line" | cut -d= -f2)
+lastfail=$(grep -oE 'lastfail=[a-z]+' <<< "$head_line" | cut -d= -f2)
+collected=$((NOW - generated))
+kicked=""
+if [ "$collected" -ge "$REFRESH" ]; then kick || kicked=" (collector could not be started)"; fi
+if [ "$collected" -ge "$STALE" ]; then
+    echo "PERSONAL BACKUPS UNKNOWN - collector stale: last collection $(hm "$collected") ago${kicked}"
+    exit 3
+fi
+if [ $((NOW - seen)) -ge "$STALE" ]; then
+    echo "PERSONAL BACKUPS UNKNOWN - collector stale: pCloud last answered $(hm $((NOW - seen))) ago${lastfail:+ (last attempt: $lastfail)}"
+    exit 3
+fi
+if [ "$rc" -eq 124 ]; then
+    # Only on a first run: once a read has succeeded, a timeout keeps the old markers.
+    echo "PERSONAL BACKUPS UNKNOWN - collector timed out reading $BASE and has no earlier markers"
+    exit 3
+fi
+markers=$(grep -E '^PBKUP marker=' <<< "$raw" | cut -d= -f2-)
 # A read that failed part way would otherwise show its unread markers as MISSING.
 if [ "$rc" -ne 0 ] || [ -z "$markers" ]; then
     echo "PERSONAL BACKUPS CRITICAL - cannot read markers at $BASE (rclone exit $rc)"; exit 2
@@ -74,6 +112,6 @@ for rot in Weekly-1 Monthly-1 Monthly-2; do
 done
 
 case $status in 0) word=OK;; 1) word=WARNING;; *) word=CRITICAL;; esac
-echo "PERSONAL BACKUPS $word - ${summary%; } | ${perf}problems=${#problems[@]}"
+echo "PERSONAL BACKUPS $word - ${summary%; }${kicked} | ${perf}problems=${#problems[@]} collected_age=${collected}s;;${STALE}"
 for p in "${problems[@]}"; do echo "$p"; done
 exit $status

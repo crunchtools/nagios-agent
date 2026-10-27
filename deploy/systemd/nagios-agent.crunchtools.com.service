@@ -42,6 +42,12 @@ Documentation=https://github.com/crunchtools/nagios-agent
 #
 # Note /etc/systemd/system above is unit FILES on disk (drift checking). It is
 # not a substitute for this: it says what is defined, never what is running.
+# STATE (7.0.0). /srv/nagios-agent.crunchtools.com/data is the agent's one
+# writable mount, at /var/lib/nagios-agent. backup-freshness-collect.sh writes
+# the pCloud backup status files there, so they survive a container recreate
+# and the backup checks do not go "collector stale" after every auto-update.
+# */data/* is in the /srv .gitignore, so this is not git drift. Without the
+# mount the collector still works, in the container's own layer.
 Wants=network-online.target
 After=network-online.target
 
@@ -51,7 +57,8 @@ Restart=always
 RestartSec=10
 ExecStartPre=/usr/bin/sleep 1.5
 ExecStartPre=-/usr/bin/podman rm -f nagios-agent.crunchtools.com
-ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent.crunchtools.com.service   --memory=1g --memory-swap=1g   --rm   --name nagios-agent.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /usr/bin/rclone:/usr/local/bin/rclone:ro   -v /etc/rclone.conf:/etc/nagios/rclone.conf:ro   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /var/srv:/var/srv:ro   -v /etc/systemd/system:/etc/systemd/system:ro   -v /run/podman/podman.sock:/run/podman/podman.sock   -v /run/systemd:/run/systemd:ro   -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket   quay.io/crunchtools/nagios-agent:latest
+ExecStartPre=/usr/bin/mkdir -p /srv/nagios-agent.crunchtools.com/data
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent.crunchtools.com.service   --memory=1g --memory-swap=1g   --rm   --name nagios-agent.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-host.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /usr/bin/rclone:/usr/local/bin/rclone:ro   -v /etc/rclone.conf:/etc/nagios/rclone.conf:ro   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /var/srv:/var/srv:ro   -v /etc/systemd/system:/etc/systemd/system:ro   -v /srv/nagios-agent.crunchtools.com/data:/var/lib/nagios-agent:Z   -v /run/podman/podman.sock:/run/podman/podman.sock   -v /run/systemd:/run/systemd:ro   -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket   quay.io/crunchtools/nagios-agent:latest
 ExecStop=/usr/bin/podman stop -t 10 nagios-agent.crunchtools.com
 ExecStopPost=/usr/bin/podman rm -f nagios-agent.crunchtools.com
 

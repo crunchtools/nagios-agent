@@ -1,145 +1,100 @@
 #!/bin/bash
-# check_backup_freshness.sh — live pCloud backup freshness for lotor (Nagios/NRPE)
+# check_backup_freshness.sh — pCloud server backup freshness for lotor (Nagios/NRPE)
 #
-# Every check hits pCloud live — no state files, no timers. Each sentinel is one
-# small rclone listing, run in waves of 7. pCloud listings are usually ~1-3s but
-# sometimes hang, so the whole run lives inside a global deadline (BUDGET, 12s)
-# that stays under the agent's command_timeout=15: each listing gets at most
-# PROBE_T seconds (6) or whatever the deadline leaves, and a sentinel reached
-# with under 2s left is reported UNCHECKED instead of being started.
+# Judges the status file backup-freshness-collect.sh writes; never touches
+# pCloud itself (7.0.0). Listing 19 sentinels live inside NRPE's 15s
+# command_timeout kept timing out on slow pCloud reads while every backup was
+# fine (11 UNKNOWNs in 48h), so the reads moved to the collector, which has a
+# 120s budget. See that script's header for the file format.
 #
-# rclone's exit code decides what an empty listing means, never the output alone:
-#   0 with a file   judged on age and size floor
-#   0 empty, 3, 4   CRITICAL MISSING (directory or file not found)
-#   124             timed out: one retry if >=3s remain, else UNKNOWN TIMEOUT
-#   anything else   one retry if >=3s remain, else UNKNOWN RCLONE ERROR
+# The collector is started from here: when the status file is missing or older
+# than REFRESH (20m), this plugin launches it detached through
+# `podman_exec.sh --detach` in nagios-agent.crunchtools.com and judges the file
+# the previous run wrote. The Nagios check_interval (30m) is the clock.
+#
+# Verdicts, per sentinel, the same thresholds as before the split:
+#   Weekly-1   WARNING 9d,  CRITICAL 16d   (pbs Servers syncs Saturdays 04:00)
+#   Monthly-*  WARNING 70d, CRITICAL 100d  (the two rotations alternate months)
+#   CRITICAL   dump missing (rclone exit 3/4 or an empty listing), or below its
+#              size floor
+#   UNKNOWN    the status file is missing or older than STALE (2h): "collector
+#              stale"; or one sentinel pCloud has not answered for in STALE
+#              (the collector keeps the last real answer through a timeout)
 # Status precedence is OK < WARNING < UNKNOWN < CRITICAL, and the first line
 # names the worst sentinel: notifications only carry that line.
-#
-# Weekly-1 sentinels: one dump file (or newest .db in a data dir) per service,
-# judged on age and a size floor — a dump that shrinks below the floor is as
-# suspect as a missing one. Monthly-1/2 alternate months (~61d cadence), proxied
-# by two representative dumps each with 70/100-day thresholds. The .sql dumps
-# never exist on lotor's disk: pbs writes them inside its container and copies
-# them straight to pCloud.
-#
-# rclone and its config are ro-mounted from the host into the agent container
-# (see the nagios-agent unit); runs unprivileged as the nrpe user.
-# Decommissioned services (zabbix) are deliberately absent. takeda (ex-openclaw, renamed 2026-10-25) is monitored as takeda-db.
 
-RCLONE=${RCLONE:-/usr/local/bin/rclone}
-CONF=${CONF:-/etc/nagios/rclone.conf}
-BASE=pcloud:Backups/Servers/lotor.dc3.crunchtools.com
-BUDGET=${BUDGET:-12}    # seconds for the whole run
-PROBE_T=${PROBE_T:-6}   # seconds per listing
-START=$(date +%s)
-DEADLINE=$((START + BUDGET))
-TMP=$(mktemp -d) || { echo "UNKNOWN - mktemp failed"; exit 3; }
-trap 'rm -rf "$TMP"' EXIT
-mkdir "$TMP/res" "$TMP/err"
+STATE_DIR=${STATE_DIR:-/var/lib/nagios-agent}
+STATUS=${STATUS:-$STATE_DIR/backup-freshness.status}
+EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/backup-freshness-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
+REFRESH=${REFRESH:-1200}   # seconds: start a collector run when the file is this old
+STALE=${STALE:-7200}       # seconds: older than this and the data is not trusted
+NOW=$(date +%s)
 
-[ -x "$RCLONE" ] || { echo "UNKNOWN - $RCLONE not mounted into agent container"; exit 3; }
-[ -r "$CONF" ]   || { echo "UNKNOWN - $CONF not readable"; exit 3; }
+W_WARN=9  W_CRIT=16    # days
+M_WARN=70 M_CRIT=100   # days
 
-W_WARN=9  W_CRIT=16    # days — Weekly-1 syncs Saturdays 04:00
-M_WARN=70 M_CRIT=100   # days — each monthly rotation fires every other month
+kick() { "$EXEC" --detach "$CONTAINER" "$COLLECT" servers >/dev/null 2>&1; }
 
-# label|rotation|warn|crit|min_bytes|mode|path
-#   mode=file : path is the exact dump file
-#   mode=dir  : newest *.db / *.sqlite* under path (recursive); ties go to the largest
-SENTINELS="
-crunchtools-db|Weekly-1|$W_WARN|$W_CRIT|15000000|file|crunchtools.com/backups/all-databases.sql
-educatedconfusion-db|Weekly-1|$W_WARN|$W_CRIT|10000000|file|educatedconfusion.com/backups/all-databases.sql
-learn-wiki-db|Weekly-1|$W_WARN|$W_CRIT|100000000|file|learn.fatherlinux.com/data/backups/my_wiki.sql
-rt-db|Weekly-1|$W_WARN|$W_CRIT|15000000|file|rt.fatherlinux.com/data/backups/rt4.sql
-rootsofthevalley-db|Weekly-1|$W_WARN|$W_CRIT|200000000|file|rootsofthevalley.org/backups/all-databases.sql
-images-rotv-db|Weekly-1|$W_WARN|$W_CRIT|400000|file|images.rootsofthevalley.org/backups/all-databases.sql
-postiz-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|postiz.crunchtools.com/backups/all-databases.sql
-acquacotta-db|Weekly-1|$W_WARN|$W_CRIT|1000|dir|acquacotta.crunchtools.com/data
-kagetora-db|Weekly-1|$W_WARN|$W_CRIT|100000|dir|kagetora.crunchtools.com/data
-takeda-db|Weekly-1|$W_WARN|$W_CRIT|50000|dir|takeda.crunchtools.com/data
-mcp-feeds-db|Weekly-1|$W_WARN|$W_CRIT|30000000|file|mcp-feeds.crunchtools.com/data/feeds.db
-mcp-memory-db|Weekly-1|$W_WARN|$W_CRIT|5000000|dir|mcp-memory.crunchtools.com/data
-mcp-metsuke-db|Weekly-1|$W_WARN|$W_CRIT|50000|file|mcp-metsuke.crunchtools.com/data/metsuke.db
-trentina-db|Weekly-1|$W_WARN|$W_CRIT|200000|dir|trentina.crunchtools.com/data
-newsletter-db|Weekly-1|$W_WARN|$W_CRIT|1000000|file|newsletter.crunchtools.com/data/kill-the-newsletter.db
-monthly1-crunchtools|Monthly-1|$M_WARN|$M_CRIT|15000000|file|crunchtools.com/backups/all-databases.sql
-monthly1-rotv|Monthly-1|$M_WARN|$M_CRIT|200000000|file|rootsofthevalley.org/backups/all-databases.sql
-monthly2-crunchtools|Monthly-2|$M_WARN|$M_CRIT|15000000|file|crunchtools.com/backups/all-databases.sql
-monthly2-rotv|Monthly-2|$M_WARN|$M_CRIT|200000000|file|rootsofthevalley.org/backups/all-databases.sql
-"
+if [ ! -r "$STATUS" ]; then
+    kick && started="collector started" || started="collector could not be started"
+    echo "BACKUPS UNKNOWN - collector stale: no status file at $STATUS ($started)"
+    exit 3
+fi
+
+raw=$(cat "$STATUS")
+generated=$(grep -m1 -oE '^BKUP generated=[0-9]+' <<< "$raw" | cut -d= -f2)
+grep -qx 'BKUP end=1' <<< "$raw" || generated=""
+if [ -z "$generated" ]; then
+    kick
+    echo "BACKUPS UNKNOWN - collector stale: $STATUS is truncated or unrecognised"
+    exit 3
+fi
+collected=$((NOW - generated))
+kicked=""
+if [ "$collected" -ge "$REFRESH" ]; then kick || kicked=" (collector could not be started)"; fi
+if [ "$collected" -ge "$STALE" ]; then
+    echo "BACKUPS UNKNOWN - collector stale: last collection $((collected / 3600))h$(( collected % 3600 / 60 ))m ago${kicked} | collected_age=${collected}s;;${STALE}"
+    exit 3
+fi
+elapsed=$(grep -m1 -oE '^BKUP generated=[0-9]+ elapsed=[0-9]+' <<< "$raw" | grep -oE '[0-9]+$')
 
 # Results carry a rank, not a Nagios code, so they sort by severity:
 # 0 OK, 1 WARNING, 2 UNCHECKED, 3 UNKNOWN, 4 CRITICAL. UNCHECKED ranks below
 # UNKNOWN so a real timeout or rclone error is what the first line names.
 R_OK=0 R_WARN=1 R_UNCHECKED=2 R_UNKNOWN=3 R_CRIT=4
 
-lsf() { # <mode> <path> <secs>: rclone alone, so its exit code reaches the caller
-    if [ "$1" = file ]; then
-        timeout "$3" "$RCLONE" --config "$CONF" lsf --files-only \
-            --format ts --separator '|' "$BASE/$2"
-    else
-        timeout "$3" "$RCLONE" --config "$CONF" lsf -R --files-only \
-            --include '*.db' --include '*.sqlite*' \
-            --format ts --separator '|' "$BASE/$2"
-    fi
-}
+field() { grep -oE "(^| )$1=[^ ]*" <<< "$2" | head -1 | cut -d= -f2; }
 
-probe() { # writes: label|rot|rank|age_days|size|message  to $TMP/res/<label>
-    local label=$1 rot=$2 warn=$3 crit=$4 min=$5 mode=$6 path=$7
-    local res="$TMP/res/$label" err="$TMP/err/$label" left t out rc tries=0 fail ts size epoch age rank msg
-    left=$((DEADLINE - $(date +%s)))
-    if [ "$left" -lt 2 ]; then
-        echo "$label|$rot|$R_UNCHECKED|-1|0|$label: UNCHECKED (out of time)" > "$res"; return
+items=0; worst=$R_OK; problems=""; unknown=0; w_total=0; w_ok=0; w_worst=0; m1_age=-1; m2_age=-1
+while IFS= read -r line; do
+    label=$(field item "$line"); rot=$(field rot "$line"); seen=$(field seen "$line")
+    result=$(field result "$line"); floor=$(field floor "$line")
+    [ -n "$label" ] || continue
+    items=$((items + 1))
+    if [ "$rot" = Weekly-1 ]; then warn=$W_WARN crit=$W_CRIT; else warn=$M_WARN crit=$M_CRIT; fi
+    age=-1
+    case "$result" in
+        ok)
+            epoch=$(field epoch "$line"); size=$(field size "$line")
+            age=$(( (NOW - epoch) / 86400 ))
+            rank=$R_OK; msg="$label: ${age}d"
+            if   [ "$age" -ge "$crit" ]; then rank=$R_CRIT; msg="$label: STALE ${age}d (crit ${crit}d)"
+            elif [ "$age" -ge "$warn" ]; then rank=$R_WARN; msg="$label: aging ${age}d (warn ${warn}d)"
+            fi
+            if [ "$size" -lt "$floor" ] 2>/dev/null; then
+                rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${floor}B), age ${age}d"
+            fi ;;
+        missing)   rank=$R_CRIT;      msg="$label: MISSING ($(field path "$line"))" ;;
+        unchecked) rank=$R_UNCHECKED; msg=${line#* msg=} ;;
+        *)         rank=$R_UNKNOWN;   msg=${line#* msg=} ;;
+    esac
+    # A sentinel pCloud has not answered for in STALE is not judged on old news,
+    # but a CRITICAL it already showed stays CRITICAL: the dump did not heal.
+    if [ "$rank" -lt "$R_CRIT" ] && [ $((NOW - ${seen:-0})) -ge "$STALE" ]; then
+        rank=$R_UNKNOWN; msg="$label: not read from pCloud for $(( (NOW - ${seen:-0}) / 3600 ))h (last: ${msg#"$label: "})"
     fi
-    while :; do
-        t=$((left < PROBE_T ? left : PROBE_T))
-        out=$(lsf "$mode" "$rot/$path" "$t" 2>"$err"); rc=$?
-        tries=$((tries + 1))
-        case $rc in
-            0) [ -n "$out" ] && break
-               echo "$label|$rot|$R_CRIT|-1|0|$label: MISSING ($rot/$path)" > "$res"; return ;;
-            3|4) echo "$label|$rot|$R_CRIT|-1|0|$label: MISSING ($rot/$path)" > "$res"; return ;;
-            124) fail="$label: TIMEOUT after ${t}s ($rot/$path)" ;;
-            *) fail="$label: RCLONE ERROR (exit $rc): $(head -1 "$err" | tr -d '|' | cut -c1-80)" ;;
-        esac
-        left=$((DEADLINE - $(date +%s)))
-        if [ "$tries" -ge 2 ] || [ "$left" -lt 3 ]; then
-            echo "$label|$rot|$R_UNKNOWN|-1|0|$fail" > "$res"; return
-        fi
-    done
-    if [ "$mode" = file ]; then
-        out=$(head -1 <<< "$out")
-    else
-        out=$(sort -t'|' -k1,1r -k2,2nr <<< "$out" | head -1)
-    fi
-    ts=${out%%|*}; size=${out##*|}
-    epoch=$(date -d "$ts" +%s 2>/dev/null) || {
-        echo "$label|$rot|$R_UNKNOWN|-1|0|$label: unparseable mtime '$ts'" > "$res"; return; }
-    age=$(( (START - epoch) / 86400 ))
-    rank=$R_OK; msg="$label: ${age}d"
-    if   [ "$age" -ge "$crit" ]; then rank=$R_CRIT; msg="$label: STALE ${age}d (crit ${crit}d)"
-    elif [ "$age" -ge "$warn" ]; then rank=$R_WARN; msg="$label: aging ${age}d (warn ${warn}d)"
-    fi
-    if [ "$size" -lt "$min" ] 2>/dev/null; then
-        rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${min}B), age ${age}d"
-    fi
-    echo "$label|$rot|$rank|$age|$size|$msg" > "$res"
-}
-
-# Waves of 7: each rclone process costs ~40-60MB and the agent container is
-# memory-capped, so unbounded parallelism gets the probes OOM-killed.
-n=0
-while IFS='|' read -r label rot warn crit min mode path; do
-    [ -z "$label" ] && continue
-    probe "$label" "$rot" "$warn" "$crit" "$min" "$mode" "$path" &
-    n=$((n+1)); [ $((n % 7)) -eq 0 ] && wait
-done <<< "$SENTINELS"
-wait
-
-worst=$R_OK; problems=""; unknown=0; w_total=0; w_ok=0; w_worst=0; m1_age=-1; m2_age=-1
-for f in "$TMP"/res/*; do
-    IFS='|' read -r label rot rank age size msg < "$f"
     [ "$rank" -gt "$worst" ] && worst=$rank
     [ "$rank" -eq "$R_UNCHECKED" ] || [ "$rank" -eq "$R_UNKNOWN" ] && unknown=$((unknown+1))
     case "$rot" in
@@ -149,7 +104,13 @@ for f in "$TMP"/res/*; do
         Monthly-2) [ "$age" -gt "$m2_age" ] && m2_age=$age ;;
     esac
     [ "$rank" -ne "$R_OK" ] && problems+="$rank|$msg"$'\n'
-done
+done < <(grep -E '^BKUP item=' <<< "$raw")
+
+if [ "$items" -eq 0 ]; then
+    echo "BACKUPS UNKNOWN - collector stale: $STATUS holds no sentinels"
+    exit 3
+fi
+
 problems=$(sort -s -t'|' -k1,1nr <<< "${problems%$'\n'}" | cut -d'|' -f2-)
 count=0; [ -n "$problems" ] && count=$(wc -l <<< "$problems")
 
@@ -167,8 +128,7 @@ if [ "$count" -gt 0 ]; then
 fi
 unchecked=""; [ "$unknown" -gt 0 ] && unchecked=", $unknown unchecked"
 days() { [ "$1" -ge 0 ] && echo "${1}d" || echo "?"; }
-elapsed=$(( $(date +%s) - START ))
-perf="weekly_worst_age=${w_worst}d;$W_WARN;$W_CRIT monthly1_age=${m1_age}d;$M_WARN;$M_CRIT monthly2_age=${m2_age}d;$M_WARN;$M_CRIT stale=${count} unknown=${unknown} elapsed=${elapsed}s"
-echo "BACKUPS $word - ${head}Weekly-1 ${w_ok}/${w_total} fresh (worst ${w_worst}d)${unchecked}; Monthly-1 $(days "$m1_age"); Monthly-2 $(days "$m2_age") | $perf"
+perf="weekly_worst_age=${w_worst}d;$W_WARN;$W_CRIT monthly1_age=${m1_age}d;$M_WARN;$M_CRIT monthly2_age=${m2_age}d;$M_WARN;$M_CRIT stale=${count} unknown=${unknown} elapsed=${elapsed:-0}s collected_age=${collected}s;;${STALE}"
+echo "BACKUPS $word - ${head}Weekly-1 ${w_ok}/${w_total} fresh (worst ${w_worst}d)${unchecked}; Monthly-1 $(days "$m1_age"); Monthly-2 $(days "$m2_age")${kicked} | $perf"
 [ -n "$problems" ] && echo "$problems"
 exit $status

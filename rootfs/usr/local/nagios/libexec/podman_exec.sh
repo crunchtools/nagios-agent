@@ -1,21 +1,30 @@
 #!/bin/bash
 # Execute a command inside a container via the Podman REST API socket
 # Replaces `podman exec` for environments without the podman CLI
-# Usage: podman_exec.sh <container-name> <command> [args...]
+# Usage: podman_exec.sh [--detach] <container-name> <command> [args...]
 # Returns: stdout and stderr from the command, exit code from the exec.
 # Exits 3 on a usage error, when the exec cannot be created, or when the API
 # reports no exit code.
+#
+# --detach starts the command and returns at once, without its output or exit
+# code: exit 0 once podman accepted the start, 3 if it did not. It exists for
+# collectors that outlive NRPE's command_timeout (backup-freshness-collect.sh):
+# the plugin starts one and judges the status file the previous run wrote.
 
-CONTAINER="$1"
+DETACH=0
+[ "${1:-}" = "--detach" ] && { DETACH=1; shift; }
+CONTAINER="${1:-}"
 shift
 SOCK="/run/podman/podman.sock"
 TMPOUT=$(mktemp /tmp/podman_exec.XXXXXX)
 trap "rm -f $TMPOUT" EXIT
 
 if [ -z "$CONTAINER" ] || [ $# -eq 0 ]; then
-    echo "Usage: podman_exec.sh <container> <command> [args...]" >&2
+    echo "Usage: podman_exec.sh [--detach] <container> <command> [args...]" >&2
     exit 3
 fi
+
+ATTACH=true; [ "$DETACH" -eq 1 ] && ATTACH=false
 
 CMD_JSON=""
 for arg in "$@"; do
@@ -27,12 +36,22 @@ CMD_JSON="${CMD_JSON%,}"
 EXEC_RESPONSE=$(curl -s --unix-socket "$SOCK" \
     -X POST "http://localhost/v5.0.0/containers/${CONTAINER}/exec" \
     -H "Content-Type: application/json" \
-    -d "{\"Cmd\":[${CMD_JSON}],\"AttachStdout\":true,\"AttachStderr\":true}" 2>/dev/null)
+    -d "{\"Cmd\":[${CMD_JSON}],\"AttachStdout\":${ATTACH},\"AttachStderr\":${ATTACH}}" 2>/dev/null)
 
 EXEC_ID=$(echo "$EXEC_RESPONSE" | grep -oP '"Id"\s*:\s*"\K[^"]+')
 
 if [ -z "$EXEC_ID" ]; then
     echo "EXEC_ERROR: Cannot create exec in container $CONTAINER" >&2
+    exit 3
+fi
+
+if [ "$DETACH" -eq 1 ]; then
+    code=$(curl -s --unix-socket "$SOCK" -o /dev/null -w '%{http_code}' \
+        -X POST "http://localhost/v5.0.0/exec/${EXEC_ID}/start" \
+        -H "Content-Type: application/json" \
+        -d '{"Detach":true}' 2>/dev/null)
+    [ "$code" = 200 ] && exit 0
+    echo "EXEC_ERROR: detached start in container $CONTAINER returned HTTP ${code:-none}" >&2
     exit 3
 fi
 

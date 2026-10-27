@@ -12,24 +12,27 @@
 # reads /var/srv itself, and nothing but counts and names crosses back — but
 # the schedule now belongs to Nagios instead of a bespoke timer.
 #
-#   WARNING   drift older than 1h   — dashboard only, no notification
+#   OK        clean, or drift younger than 4h ("within grace")
+#   WARNING   drift older than 4h
 #   CRITICAL  drift older than 24h  — notifies
 #   UNKNOWN   the collector could not be run, or answered garbage
 #
-# Thresholds are deliberately tight. Nagios here notifies on CRITICAL only
-# (contacts.cfg, hermes, service_notification_options c), so a WARNING is a
-# dashboard colour and costs nothing. There is no reason to tolerate an hour of
-# unsaved config quietly.
+# WARN was 1h until 7.0.0. An hour is shorter than an ordinary deploy: copy to
+# /srv, restart, watch it, commit. Every deploy turned the dashboard yellow and
+# the weekend report counted each one as an infrastructure problem. 4h still
+# catches config that was edited and forgotten the same day, and CRITICAL at
+# 24h is unchanged. WARN and CRIT are env overrides, in seconds.
 
 set -uo pipefail
 
 EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 COLLECT=${COLLECT:-/usr/local/nagios/libexec/srv-drift-collect.sh}
 CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
-WARN=${WARN:-3600}
+WARN=${WARN:-14400}
 CRIT=${CRIT:-86400}
 
 OK=0; WARNING=1; CRITICAL=2; UNKNOWN=3
+dur() { if [ "$1" -ge 3600 ]; then echo "$(( $1 / 3600 ))h"; else echo "$(( $1 / 60 ))m"; fi; }
 
 raw=$("$EXEC" "$CONTAINER" "$COLLECT" 2>/dev/null)
 rc=$?
@@ -78,4 +81,4 @@ full="$msg | $perf drift_age=${drift_age}s;${WARN};${CRIT};0"
 
 if [ "$drift_age" -ge "$CRIT" ]; then echo "GIT DRIFT CRITICAL - $full"; exit $CRITICAL
 elif [ "$drift_age" -ge "$WARN" ]; then echo "GIT DRIFT WARNING - $full"; exit $WARNING
-else echo "GIT DRIFT OK - $full"; exit $OK; fi
+else echo "GIT DRIFT OK - drift ${human}, within grace (warn after $(dur "$WARN")): $full"; exit $OK; fi
