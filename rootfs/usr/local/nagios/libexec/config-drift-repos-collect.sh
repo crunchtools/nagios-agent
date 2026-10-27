@@ -29,6 +29,14 @@
 # findings. A fingerprint exec that fails leaves the previous status file in
 # place (it ages out in the plugin); with no previous file it records why.
 #
+# TUNABLES, from the environment, for a run by hand or a test:
+#   CONFIG_DRIFT_TIMEOUT     seconds per clone (30)
+#   CONFIG_DRIFT_JOBS        clones at a time (16)
+#   CONFIG_DRIFT_FP_TIMEOUT  seconds for the fingerprint exec (60)
+#   BUDGET                   seconds for all clones together (180)
+#   CONFIG_DRIFT_CONF, CONFIG_DRIFT_ORG, CONFIG_DRIFT_GIT_HOST, FP_CONTAINER,
+#   FINGERPRINT              where the map, the repos and the fingerprint are
+#
 # WHAT IT WRITES, $STATE_DIR/config-drift.status, replaced atomically:
 #   CFGDRIFT generated=<epoch> elapsed=<s> deployed=<n> unpublished=<n>
 #   CFGDRIFT generated=<epoch> error=<reason>
