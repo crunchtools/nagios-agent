@@ -416,3 +416,33 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/backup-freshness-collect.sh"
 justification = "Not an NRPE plugin: the slow half of the 7.0.0 backup freshness split. check_backup_freshness.sh and check_personal_backup_freshness.sh start it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside them."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/collector-lib.sh"
+justification = "Not an NRPE plugin: the shared half of the 7.1.0 collector and status-file pattern, sourced by the collectors and the checks that judge their files. It must sit beside them at the libexec path, which is the only directory the deployed agents mount their scripts into."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/cloudflare-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.1.0 Cloudflare split. check_cloudflare_status.sh and check_cloudflare_global.sh start it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside them."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/quay-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.1.0 Quay staleness split. check_quay_staleness.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/registry-drift-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.1.0 registry drift split. check_registry_drift.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/google-oauth-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.1.0 Google OAuth split. check_google_oauth.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"

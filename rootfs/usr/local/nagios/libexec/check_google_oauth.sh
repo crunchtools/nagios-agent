@@ -19,6 +19,15 @@
 # mounted, a Python interpreter, and egress to Google. The access token it gets
 # back is discarded and the credential file is never written.
 #
+# COLLECTOR (7.1.0). The exchange is an outside call, so it no longer runs
+# inside NRPE's timeout: google-oauth-collect.sh runs it for every account and
+# writes google-oauth.status, and this plugin judges that file. When the file
+# is missing or older than REFRESH (2m, under the 3m check_interval) the
+# collector is started detached through `podman_exec.sh --detach` in
+# nagios-agent-ctr.crunchtools.com and the previous run's file is judged. A
+# test that could not be made keeps the previous answer; one older than STALE
+# (10m) is UNKNOWN, and so is a status file missing or older than STALE.
+#
 # Usage: check_google_oauth.sh <account-key>
 #
 # The account key is an opaque handle — "personal", "work". The container name,
@@ -32,11 +41,13 @@
 
 KEY="${1:-}"
 ACCOUNTS="${GOOGLE_ACCOUNTS:-/etc/nagios/google-accounts.conf}"
-SOCK="/run/podman/podman.sock"
-API="http://localhost/v5.0.0"
 
 if [ -z "$KEY" ]; then
     echo "UNKNOWN - usage: check_google_oauth.sh <account-key>"
+    exit 3
+fi
+if ! [[ $KEY =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "UNKNOWN - invalid account key"
     exit 3
 fi
 
@@ -54,67 +65,36 @@ fi
 
 LABEL="${LABEL:-$CTR}"
 
-# The backend images are distroless -- no shell -- so the exec Cmd has to be
-# python3 directly. The payload is base64'd and decoded inside Python to keep
-# it clear of both JSON and shell quoting.
-read -r -d '' PY <<'PYEOF'
-import json, sys, urllib.request, urllib.parse, urllib.error
-cred = sys.argv[1]
-try:
-    d = json.load(open(cred))
-except Exception as e:
-    print("OAUTH|NOCRED|%s" % type(e).__name__); raise SystemExit(0)
-missing = [k for k in ("client_id", "client_secret", "refresh_token") if not d.get(k)]
-if missing:
-    print("OAUTH|NOTOKEN|%s" % ",".join(missing)); raise SystemExit(0)
-body = urllib.parse.urlencode({
-    "client_id": d["client_id"], "client_secret": d["client_secret"],
-    "refresh_token": d["refresh_token"], "grant_type": "refresh_token"}).encode()
-uri = d.get("token_uri") or "https://oauth2.googleapis.com/token"
-try:
-    r = urllib.request.urlopen(urllib.request.Request(uri, data=body), timeout=20)
-    print("OAUTH|200|%s" % json.load(r).get("expires_in", "?"))
-except urllib.error.HTTPError as e:
-    try:
-        err = json.loads(e.read()).get("error", "unknown")
-    except Exception:
-        err = "unknown"
-    print("OAUTH|%d|%s" % (e.code, err))
-except Exception as e:
-    print("OAUTH|NET|%s" % type(e).__name__)
-PYEOF
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "UNKNOWN - cannot load collector-lib.sh"; exit 3; }
+STATUS=${STATUS:-$STATE_DIR/google-oauth.status}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/google-oauth-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent-ctr.crunchtools.com}
+REFRESH=${REFRESH:-120}
+STALE=${STALE:-600}
 
-# base64 output is alphanumeric plus +/= only, so the payload needs no JSON
-# escaping -- which matters because the agent image is minimal and ships no
-# python of its own to escape it with.
-B64=$(printf '%s' "$PY" | base64 -w0)
-CODE="import base64;exec(base64.b64decode('$B64'))"
-
-EXEC=$(curl -s --max-time 15 --unix-socket "$SOCK" -X POST -H 'Content-Type: application/json' \
-    -d "{\"AttachStdout\":true,\"AttachStderr\":true,\"Cmd\":[\"python3\",\"-c\",\"$CODE\",\"$CRED\"]}" \
-    "$API/containers/${CTR}/exec" 2>/dev/null)
-
-ID=$(echo "$EXEC" | grep -o '"Id":"[^"]*' | cut -d'"' -f4)
-if [ -z "$ID" ]; then
-    echo "UNKNOWN - $LABEL: could not create exec in $CTR (is the container running?)"
-    exit 3
-fi
-
-OUT=$(curl -s --max-time 40 --unix-socket "$SOCK" -X POST -H 'Content-Type: application/json' \
-    -d '{"Detach":false,"Tty":true}' "$API/exec/$ID/start" 2>/dev/null \
-    | tr -d '\000-\011\013-\037')
-
-# The podman exec stream interleaves binary frame headers with the payload, so
-# strip control bytes above and then accept only the characters these fields can
-# legitimately contain -- otherwise stray 0x01 bytes end up in the Nagios output.
-LINE=$(echo "$OUT" | grep -oE 'OAUTH\|[A-Z0-9]+\|[A-Za-z0-9_,.?-]*' | head -1)
+cl_open GOAUTH ""
+LINE=$(grep -m1 -E "^GOAUTH key=$KEY " <<< "$CL_RAW")
 if [ -z "$LINE" ]; then
-    echo "UNKNOWN - $LABEL: no verdict returned from $CTR"
+    echo "UNKNOWN - $LABEL: not collected yet, the collector has no answer for '$KEY'${CL_KICKED}"
     exit 3
 fi
 
-STATUS_FIELD=$(echo "$LINE" | cut -d'|' -f2)
-DETAIL=$(echo "$LINE" | cut -d'|' -f3)
+SEEN=$(cl_field seen "$LINE")
+SINCE=$(( $(date +%s) - ${SEEN:-0} ))
+STATUS_FIELD=$(cl_field result "$LINE")
+DETAIL=$(cl_field detail "$LINE")
+
+# An answer about the token that is older than STALE is not judged, except a
+# rejection: a token Google refused does not heal while nobody can look.
+case "$STATUS_FIELD" in
+    400|401|NOTOKEN|NOCRED) ;;
+    *)
+        if [ "$SINCE" -ge "$STALE" ]; then
+            echo "UNKNOWN - $LABEL: token not tested for $(cl_hm "$SINCE") (last: ${STATUS_FIELD} ${DETAIL})${CL_KICKED}"
+            exit 3
+        fi ;;
+esac
 
 case "$STATUS_FIELD" in
     200)
@@ -135,6 +115,14 @@ case "$STATUS_FIELD" in
         ;;
     NET)
         echo "UNKNOWN - $LABEL: $CTR could not reach Google (${DETAIL}) - says nothing about the token"
+        exit 3
+        ;;
+    EXEC)
+        echo "UNKNOWN - $LABEL: could not create exec in $CTR (is the container running?)"
+        exit 3
+        ;;
+    NOVERDICT)
+        echo "UNKNOWN - $LABEL: no verdict returned from $CTR"
         exit 3
         ;;
     *)

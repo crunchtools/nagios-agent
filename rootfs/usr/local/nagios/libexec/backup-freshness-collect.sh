@@ -50,10 +50,12 @@
 
 set -uo pipefail
 
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || exit 3
+
 MODE=${1:-}
 RCLONE=${RCLONE:-/usr/local/bin/rclone}
 CONF=${CONF:-/etc/nagios/rclone.conf}
-STATE_DIR=${STATE_DIR:-/var/lib/nagios-agent}
 BUDGET=${BUDGET:-120}     # seconds for the whole servers run
 PROBE_T=${PROBE_T:-30}    # seconds per listing
 PERSONAL_T=${PERSONAL_T:-60}
@@ -66,9 +68,7 @@ case "$MODE" in
     *) echo "usage: backup-freshness-collect.sh servers|personal" >&2; exit 3 ;;
 esac
 
-mkdir -p "$STATE_DIR" || exit 3
-exec 9>"$STATE_DIR/.$MODE.lock" || exit 3
-flock -n 9 || exit 0   # a run is already in progress; it will write the file
+cl_lock "$MODE"   # exits 0 when a run is already in progress; it will write the file
 
 [ -x "$RCLONE" ] || { echo "$RCLONE not mounted into agent container" >&2; exit 3; }
 [ -r "$CONF" ]   || { echo "$CONF not readable" >&2; exit 3; }
@@ -77,16 +77,8 @@ START=$(date +%s)
 TMP=$(mktemp -d) || exit 3
 trap 'rm -rf "$TMP"' EXIT
 
-publish() { # <file>: atomic replace, world-readable for the nrpe user
-    local out="$STATUS.tmp.$$"
-    cp "$1" "$out"         || { echo "publish: cannot write $out" >&2; rm -f "$out"; return 1; }
-    chmod 0644 "$out"      || { echo "publish: cannot chmod $out" >&2; rm -f "$out"; return 1; }
-    mv -f "$out" "$STATUS" || { echo "publish: cannot rename $out to $STATUS" >&2; rm -f "$out"; return 1; }
-}
-
-previous() { # <grep -E pattern>: matching lines of the current status file, if any
-    [ -r "$STATUS" ] && grep -E "$1" "$STATUS"
-}
+publish() { cl_publish "$1" "$STATUS"; }
+previous() { cl_previous "$STATUS" "$1"; }
 
 collect_personal() {
     local markers rc tries=0 lastfail=""

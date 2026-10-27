@@ -23,9 +23,9 @@
 # Status precedence is OK < WARNING < UNKNOWN < CRITICAL, and the first line
 # names the worst sentinel: notifications only carry that line.
 
-STATE_DIR=${STATE_DIR:-/var/lib/nagios-agent}
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "BACKUPS UNKNOWN - cannot load collector-lib.sh"; exit 3; }
 STATUS=${STATUS:-$STATE_DIR/backup-freshness.status}
-EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 COLLECT=${COLLECT:-/usr/local/nagios/libexec/backup-freshness-collect.sh}
 CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 REFRESH=${REFRESH:-1200}   # seconds: start a collector run when the file is this old
@@ -35,29 +35,8 @@ NOW=$(date +%s)
 W_WARN=9  W_CRIT=16    # days
 M_WARN=70 M_CRIT=100   # days
 
-kick() { "$EXEC" --detach "$CONTAINER" "$COLLECT" servers >/dev/null 2>&1; }
-
-if [ ! -r "$STATUS" ]; then
-    kick && started="collector started" || started="collector could not be started"
-    echo "BACKUPS UNKNOWN - collector stale: no status file at $STATUS ($started)"
-    exit 3
-fi
-
-raw=$(cat "$STATUS")
-generated=$(grep -m1 -oE '^BKUP generated=[0-9]+' <<< "$raw" | cut -d= -f2)
-grep -qx 'BKUP end=1' <<< "$raw" || generated=""
-if [ -z "$generated" ]; then
-    kick
-    echo "BACKUPS UNKNOWN - collector stale: $STATUS is truncated or unrecognised"
-    exit 3
-fi
-collected=$((NOW - generated))
-kicked=""
-if [ "$collected" -ge "$REFRESH" ]; then kick || kicked=" (collector could not be started)"; fi
-if [ "$collected" -ge "$STALE" ]; then
-    echo "BACKUPS UNKNOWN - collector stale: last collection $((collected / 3600))h$(( collected % 3600 / 60 ))m ago${kicked} | collected_age=${collected}s;;${STALE}"
-    exit 3
-fi
+cl_open BKUP BACKUPS servers   # exits UNKNOWN "collector stale" when it must
+raw=$CL_RAW collected=$CL_AGE kicked=$CL_KICKED
 elapsed=$(grep -m1 -oE '^BKUP generated=[0-9]+ elapsed=[0-9]+' <<< "$raw" | grep -oE '[0-9]+$')
 
 # Results carry a rank, not a Nagios code, so they sort by severity:
@@ -65,24 +44,18 @@ elapsed=$(grep -m1 -oE '^BKUP generated=[0-9]+ elapsed=[0-9]+' <<< "$raw" | grep
 # UNKNOWN so a real timeout or rclone error is what the first line names.
 R_OK=0 R_WARN=1 R_UNCHECKED=2 R_UNKNOWN=3 R_CRIT=4
 
-# field <name> <line>: value of name=, in-shell (no subprocess per field; a
-# check reads ~19 lines of ~7 fields each).
-field() {
-    local re="(^| )$1=([^ ]*)"
-    [[ $2 =~ $re ]] && printf '%s' "${BASH_REMATCH[2]}"
-}
 
 items=0; worst=$R_OK; problems=""; unknown=0; w_total=0; w_ok=0; w_worst=0; m1_age=-1; m2_age=-1
 while IFS= read -r line; do
-    label=$(field item "$line"); rot=$(field rot "$line"); seen=$(field seen "$line")
-    result=$(field result "$line"); floor=$(field floor "$line")
+    label=$(cl_field item "$line"); rot=$(cl_field rot "$line"); seen=$(cl_field seen "$line")
+    result=$(cl_field result "$line"); floor=$(cl_field floor "$line")
     [ -n "$label" ] || continue
     items=$((items + 1))
     if [ "$rot" = Weekly-1 ]; then warn=$W_WARN crit=$W_CRIT; else warn=$M_WARN crit=$M_CRIT; fi
     age=-1
     case "$result" in
         ok)
-            epoch=$(field epoch "$line"); size=$(field size "$line")
+            epoch=$(cl_field epoch "$line"); size=$(cl_field size "$line")
             age=$(( (NOW - epoch) / 86400 ))
             rank=$R_OK; msg="$label: ${age}d"
             if   [ "$age" -ge "$crit" ]; then rank=$R_CRIT; msg="$label: STALE ${age}d (crit ${crit}d)"
@@ -91,7 +64,7 @@ while IFS= read -r line; do
             if [ "$size" -lt "$floor" ] 2>/dev/null; then
                 rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${floor}B), age ${age}d"
             fi ;;
-        missing)   rank=$R_CRIT;      msg="$label: MISSING ($(field path "$line"))" ;;
+        missing)   rank=$R_CRIT;      msg="$label: MISSING ($(cl_field path "$line"))" ;;
         unchecked) rank=$R_UNCHECKED; msg=${line#* msg=} ;;
         *)         rank=$R_UNKNOWN;   msg=${line#* msg=} ;;
     esac

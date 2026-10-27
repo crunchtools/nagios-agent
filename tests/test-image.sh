@@ -123,6 +123,11 @@ check "backup state dir exists and flock is installed" \
 check "check_backup_freshness is UNKNOWN collector stale with no status file" \
     $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
     '/usr/local/nagios/libexec/check_backup_freshness.sh | grep -q "collector stale"'
+# 7.1.0. The outside-API checks load collector-lib.sh from beside them and,
+# with no status file and no socket, are UNKNOWN "collector stale" too.
+check "outside-API checks are UNKNOWN collector stale with no status file" \
+    $RUNTIME run --rm --entrypoint sh "$IMAGE" -c \
+    'cd /usr/local/nagios/libexec && printf "%s\n" "check_cloudflare_status.sh example.com" check_cloudflare_global.sh "check_quay_staleness.sh example/x 8 latest" check_registry_drift.sh | while read -r c; do ./$c | grep -q "UNKNOWN - collector stale" || { echo "not stale: $c"; exit 1; }; done'
 
 echo ""
 echo "=== Runtime tests ==="

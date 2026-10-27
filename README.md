@@ -30,12 +30,16 @@ daemon is the sole witness to its own death.
    `check_container_restart.sh`.
 3. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
-   `check_quay_pull_source.sh`.
+   `check_quay_pull_source.sh`. Whether every image's newest release reached
+   Quay and GHCR, `check_registry_drift.sh`.
 4. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
-   credential. `check_google_oauth.sh`.
-5. **Edge and local services** — Cloudflare zone analytics, systemd unit drift,
+   credential. `check_google_oauth.sh`. Postiz channel tokens, read from its
+   own database, `check_postiz_tokens.sh`.
+5. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
+   and incidents on the components we use, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
+   `check_cloudflare_global.sh`,
    `check_systemd_units.sh`, `check_tcp_local.sh`. A FUSE mount that is
    mounted and still answers a listing (`check_fuse_mount.sh`), a SQLite
    index that is not empty (`check_sqlite_rows.sh`), and mcp-trove's last
@@ -50,7 +54,23 @@ daemon is the sole witness to its own death.
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service
    writes its dump `0600`.
-6. **Configuration drift, three doors** — `/srv` against its own git
+7. **Outside calls off the hot path** — the checks in the table below make no
+   outside call inside NRPE's timeout (constitution XVI). A collector does the reads with a
+   generous budget and a timeout per item, keeps an item's last good answer
+   through a failed read, and writes a status file atomically to
+   `/var/lib/nagios-agent`; the check judges the file with its old thresholds
+   and starts the collector detached (`podman_exec.sh --detach`) when the file
+   is due. UNKNOWN "collector stale" means the file is missing or older than a
+   few check intervals. Shared pieces live in `collector-lib.sh`.
+
+   | Collector | Checks | Kick / stale |
+   |-----------|--------|--------------|
+   | `backup-freshness-collect.sh` | backup freshness, personal backups | 20m / 2h |
+   | `cloudflare-collect.sh` | CF zones, Cloudflare global status | 2m / 10m |
+   | `quay-collect.sh` | Quay staleness | 2m / 10m |
+   | `registry-drift-collect.sh` | Registry drift | 30m / 3h |
+   | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
+8. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
    repo that also carries it (`check_config_drift.sh`). The third exists
