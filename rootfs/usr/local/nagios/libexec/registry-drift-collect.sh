@@ -211,7 +211,8 @@ timeout "$BUDGET" xargs -P "$JOBS" -L1 bash -c 'check_one "$@"' _ < "$TMP/images
 # Index the workers' lines by image once: "<kind> <value> <since>".
 declare -A answer=()
 while read -r img rest; do
-    [ -n "$img" ] && [ -z "${answer[$img]:-}" ] && answer[$img]=$rest
+    [[ $img =~ ^[A-Za-z0-9._-]+$ ]] || continue   # same rule as the conf loop below
+    [ -z "${answer[$img]:-}" ] && answer[$img]=$rest
 done < "$TMP/results"
 
 {
