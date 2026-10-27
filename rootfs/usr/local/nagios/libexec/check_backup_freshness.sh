@@ -65,7 +65,12 @@ elapsed=$(grep -m1 -oE '^BKUP generated=[0-9]+ elapsed=[0-9]+' <<< "$raw" | grep
 # UNKNOWN so a real timeout or rclone error is what the first line names.
 R_OK=0 R_WARN=1 R_UNCHECKED=2 R_UNKNOWN=3 R_CRIT=4
 
-field() { grep -oE "(^| )$1=[^ ]*" <<< "$2" | head -1 | cut -d= -f2; }
+# field <name> <line>: value of name=, in-shell (no subprocess per field; a
+# check reads ~19 lines of ~7 fields each).
+field() {
+    local re="(^| )$1=([^ ]*)"
+    [[ $2 =~ $re ]] && printf '%s' "${BASH_REMATCH[2]}"
+}
 
 items=0; worst=$R_OK; problems=""; unknown=0; w_total=0; w_ok=0; w_worst=0; m1_age=-1; m2_age=-1
 while IFS= read -r line; do

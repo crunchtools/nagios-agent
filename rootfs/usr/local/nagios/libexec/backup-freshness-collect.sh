@@ -79,7 +79,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 publish() { # <file>: atomic replace, world-readable for the nrpe user
     local out="$STATUS.tmp.$$"
-    cp "$1" "$out" && chmod 0644 "$out" && mv -f "$out" "$STATUS"
+    cp "$1" "$out"         || { echo "publish: cannot write $out" >&2; rm -f "$out"; return 1; }
+    chmod 0644 "$out"      || { echo "publish: cannot chmod $out" >&2; rm -f "$out"; return 1; }
+    mv -f "$out" "$STATUS" || { echo "publish: cannot rename $out to $STATUS" >&2; rm -f "$out"; return 1; }
 }
 
 previous() { # <grep -E pattern>: matching lines of the current status file, if any
