@@ -933,7 +933,7 @@ echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"
 GO="$LIBEXEC/check_google_oauth.sh"
 GSTAT="$RSTATE/google-oauth.status"
-printf '# key container credential label\npersonal ctr-a /cred/a.json alice@example.com\nwork ctr-b /cred/b.json bob@example.org\n' > "$RSTUBS/accounts.conf"
+printf '# key container credential label\npersonal ctr-a /cred/alice@example.com.json alice@example.com\nwork ctr-b /cred/bob@example.org.json bob@example.org\nbroken ctr;x /cred/c.json carol@example.net\n' > "$RSTUBS/accounts.conf"
 gcol() { GOOGLE_ACCOUNTS="$RSTUBS/accounts.conf" rcol "$GC"; }
 gchk() { GOOGLE_ACCOUNTS="$RSTUBS/accounts.conf" rchk "$GO" "$@"; }
 go() { rm -f "$GSTAT"; gcol; gchk "$@"; }
@@ -958,6 +958,10 @@ age_status "$GSTAT" 700
 expect "status past STALE is UNKNOWN collector stale" 3 "^UNKNOWN - collector stale: last collection 0h11m" yes -- gchk personal
 rm -f "$GSTAT"
 expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file .*collector started" yes -- gchk personal
+# Regression (7.1.0): credential paths named for the account carry '@'; the
+# collector skipped them silently and both accounts sat at "not collected yet".
+STUB_OAUTH='OAUTH|200|3599' expect "an '@' in the credential path is collected" 0 "^OK - bob@example.org: refresh token valid" no -- go work
+expect "a rejected conf line is reported, not skipped" 3 "^UNKNOWN - carol@example.net: google-accounts.conf line rejected" no -- gchk broken
 expect "unknown account key is UNKNOWN" 3 "^UNKNOWN - account key 'nobody' not found" no -- gchk nobody
 rm -rf "$RSTATE" "$RSTUBS"
 

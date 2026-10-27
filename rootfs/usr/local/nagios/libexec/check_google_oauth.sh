@@ -125,6 +125,10 @@ case "$STATUS_FIELD" in
         echo "UNKNOWN - $LABEL: no verdict returned from $CTR"
         exit 3
         ;;
+    BADCONF)
+        echo "UNKNOWN - $LABEL: google-accounts.conf line rejected by the collector (${DETAIL}) - fix the conf, says nothing about the token"
+        exit 3
+        ;;
     *)
         echo "UNKNOWN - $LABEL: unexpected response from token endpoint (HTTP $STATUS_FIELD ${DETAIL})"
         exit 3

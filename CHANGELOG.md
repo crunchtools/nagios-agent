@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.1.1] - 2026-10-26
+
+### Fixed
+
+- `google-oauth-collect.sh` rejected credential paths containing `@`, which is
+  how the production files are named, and skipped those lines silently: both
+  "OAuth refresh token" checks sat at "not collected yet". `@` is allowed, and a
+  conf line the collector rejects is now reported as UNKNOWN (BADCONF) instead
+  of skipped. The test fixture uses account-named paths.
+
 ## [7.1.0] - 2026-10-26
 
 ### Added

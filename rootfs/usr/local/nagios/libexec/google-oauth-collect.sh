@@ -110,7 +110,14 @@ probe() { # <key> <container> <credential-path>: one GOAUTH line to $TMP/res/<ke
 
 if [ -r "$ACCOUNTS" ]; then
     while read -r key ctr cred _; do
-        [[ $key =~ ^[A-Za-z0-9_-]+$ && $ctr =~ ^[A-Za-z0-9._-]+$ && $cred =~ ^/[A-Za-z0-9._/-]+$ ]] || continue
+        [[ $key =~ ^[A-Za-z0-9_-]+$ ]] || continue
+        # Credential files are named for their account, so '@' is allowed.
+        # A line that fails the check is reported, not skipped: a skip left
+        # both accounts at "not collected yet" in 7.1.0.
+        if [[ ! $ctr =~ ^[A-Za-z0-9._-]+$ || ! $cred =~ ^/[A-Za-z0-9._@/-]+$ ]]; then
+            echo "GOAUTH key=$key seen=$(date +%s) result=BADCONF detail=container_or_path_rejected" > "$TMP/res/$key"
+            continue
+        fi
         probe "$key" "$ctr" "$cred" &
     done < <(awk '$1 !~ /^#/ && NF >= 3 { print $1, $2, $3 }' "$ACCOUNTS")
 fi
