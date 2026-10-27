@@ -620,6 +620,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 cat > "$CW/fpexec" <<'STUB'
 #!/bin/bash
 [ -n "${STUB_FP_FAIL:-}" ] && exit 3
+[ -n "${STUB_FP_SLOW:-}" ] && exec sleep 30
 shift; exec "$@"
 STUB
 chmod +x "$CW/fpexec"
@@ -665,6 +666,10 @@ cdcol; STUB_FP_FAIL=1 cdcol
 expect "a failed fingerprint exec keeps the previous file" 1 "^CONFIG DRIFT WARNING - 1/2 " no -- cdchk
 rm -f "$CDSTAT"; STUB_FP_FAIL=1 cdcol
 expect "a failed fingerprint with no previous file says why" 3 "^CONFIG DRIFT UNKNOWN - collector reported: fingerprint exec in nagios-agent.crunchtools.com exited 3" no -- cdchk
+T0=$SECONDS
+rm -f "$CDSTAT"; STUB_FP_SLOW=1 CONFIG_DRIFT_FP_TIMEOUT=1 cdcol
+ok_if "a hung fingerprint exec stays inside its timeout" [ $((SECONDS - T0)) -le 3 ]
+expect "a timed-out fingerprint with no previous file says why" 3 "^CONFIG DRIFT UNKNOWN - collector reported: fingerprint exec in nagios-agent.crunchtools.com exited 124" no -- cdchk
 rm -f "$CDSTAT"; STATE_DIR="$CDSTATE" CONFIG_DRIFT_CONF=/nonexistent "$CDC"
 expect "unreadable source map is UNKNOWN" 3 "^CONFIG DRIFT UNKNOWN - cannot read source map" no -- cdchk
 cdcol; sed -i -E "s/generated=[0-9]+/generated=$(( $(date +%s) - 2000 ))/" "$CDSTAT"

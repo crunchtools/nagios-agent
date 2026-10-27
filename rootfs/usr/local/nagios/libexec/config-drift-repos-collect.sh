@@ -13,7 +13,8 @@
 #
 #   1. the fingerprint of the deployed tree, from config-drift-collect.sh run
 #      as root through podman_exec.sh in nagios-agent.crunchtools.com, which
-#      has /var/srv mounted. Nothing privileged touches the network.
+#      has /var/srv mounted, bounded by FP_TIMEOUT (60s). Nothing privileged
+#      touches the network.
 #   2. one blobless bare clone per rival repo named in config-sources.conf,
 #      JOBS (16) at a time, NET_TIMEOUT (30s) a clone, inside BUDGET (180s).
 #
@@ -52,6 +53,7 @@ JOBS=${CONFIG_DRIFT_JOBS:-16}
 BUDGET=${BUDGET:-180}
 FP_CONTAINER=${FP_CONTAINER:-nagios-agent.crunchtools.com}
 FINGERPRINT=${FINGERPRINT:-/usr/local/nagios/libexec/config-drift-collect.sh}
+FP_TIMEOUT=${CONFIG_DRIFT_FP_TIMEOUT:-60}
 STATUS="$STATE_DIR/config-drift.status"
 CACHE="$STATE_DIR/config-drift-repos"
 
@@ -88,7 +90,9 @@ mkdir -p "$CACHE" || publish_error cache_unwritable
 
 # ---- 1. the deployed fingerprint --------------------------------------------
 
-raw=$("$EXEC" "$FP_CONTAINER" "$FINGERPRINT" 2>/dev/null)
+# Bounded like every other read here: a stalled exec must not hold the lock
+# and keep every later run out. timeout exits 124 when it fires.
+raw=$(timeout "$FP_TIMEOUT" "$EXEC" "$FP_CONTAINER" "$FINGERPRINT" 2>/dev/null 9>&-)
 rc=$?
 [ "$rc" -eq 0 ] || transient "fingerprint exec in $FP_CONTAINER exited $rc"
 
