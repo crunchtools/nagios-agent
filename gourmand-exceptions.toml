@@ -410,3 +410,9 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_trove_run.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/backup-freshness-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.0.0 backup freshness split. check_backup_freshness.sh and check_personal_backup_freshness.sh start it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside them."
+classification = "by_design"

@@ -17,12 +17,28 @@
 # WARNING, not CRITICAL, on purpose: drift is a process defect, not an outage,
 # and hermes pages on CRITICAL only. This should nag, not wake anyone.
 #
+# GRACE (7.0.0). Every release used to read as drift: the deploy copies the new
+# plugins into /srv minutes or hours before auto-update pulls the image that
+# carries them, and the check went WARNING in between, every time. Now each
+# differing plugin is dated by the mtime of its file in the live (scripts) dir;
+# a released plugin that is missing from it, by the mtime of the dir, which a
+# deletion bumps. Stateless, nothing to lose on a restart:
+#
+#   OK        no drift, or every differing plugin younger than WARN (4h)
+#   WARNING   any differing plugin older than WARN
+#
+# PLUGIN_DRIFT_WARN overrides WARN, in seconds, beside PLUGIN_DRIFT_LIVE and
+# PLUGIN_DRIFT_RELEASED.
+#
 # Honesty rules, the whole point of the RT #1488 sweep: if the reference copy
 # is missing or unreadable, say UNKNOWN. Never report "no drift" for a
 # comparison that did not happen.
 
 LIVE="${PLUGIN_DRIFT_LIVE:-/usr/local/nagios/libexec}"
 RELEASED="${PLUGIN_DRIFT_RELEASED:-/usr/local/nagios/libexec-released}"
+WARN="${PLUGIN_DRIFT_WARN:-14400}"
+
+dur() { if [ "$1" -ge 3600 ]; then echo "$(( $1 / 3600 ))h"; else echo "$(( $1 / 60 ))m"; fi; }
 
 if [ ! -d "$RELEASED" ]; then
     echo "UNKNOWN - no released copy at ${RELEASED}; image predates RT #1490, rebuild the agent image to enable this check"
@@ -47,19 +63,30 @@ fi
 modified=""
 only_live=""
 only_released=""
+oldest=0   # mtime of the oldest piece of drift; 0 = none seen yet
+
+note() { # <mtime>: keep the oldest
+    [ -n "$1" ] || return 0
+    if [ "$oldest" -eq 0 ] || [ "$1" -lt "$oldest" ]; then oldest=$1; fi
+}
 
 for f in "$LIVE"/*.sh; do
     b=$(basename "$f")
     if [ ! -f "$RELEASED/$b" ]; then
         only_live="${only_live}${b} "
+        note "$(stat -c %Y -- "$f" 2>/dev/null)"
     elif ! cmp -s "$f" "$RELEASED/$b"; then
         modified="${modified}${b} "
+        note "$(stat -c %Y -- "$f" 2>/dev/null)"
     fi
 done
 
 for f in "$RELEASED"/*.sh; do
     b=$(basename "$f")
-    [ -f "$LIVE/$b" ] || only_released="${only_released}${b} "
+    if [ ! -f "$LIVE/$b" ]; then
+        only_released="${only_released}${b} "
+        note "$(stat -c %Y -- "$LIVE" 2>/dev/null)"
+    fi
 done
 
 n_mod=$(printf '%s' "$modified" | wc -w)
@@ -74,10 +101,21 @@ if [ "$total" -eq 0 ]; then
     exit 0
 fi
 
-msg="PLUGIN DRIFT WARNING - ${total} differ from the released image:"
-[ "$n_mod"  -gt 0 ] && msg="${msg} modified(${n_mod}): ${modified}"
-[ "$n_live" -gt 0 ] && msg="${msg} running-but-never-released(${n_live}): ${only_live}"
-[ "$n_rel"  -gt 0 ] && msg="${msg} released-but-not-running(${n_rel}): ${only_released}"
+# No readable mtime counts as aged: never grant grace on a guess.
+age=$WARN
+[ "$oldest" -gt 0 ] && age=$(( $(date +%s) - oldest ))
+[ "$age" -lt 0 ] && age=0
+PERFDATA="${PERFDATA} drift_age=${age}s;${WARN};;0;"
 
-echo "${msg}| $PERFDATA"
+detail=""
+[ "$n_mod"  -gt 0 ] && detail="${detail} modified(${n_mod}): ${modified}"
+[ "$n_live" -gt 0 ] && detail="${detail} running-but-never-released(${n_live}): ${only_live}"
+[ "$n_rel"  -gt 0 ] && detail="${detail} released-but-not-running(${n_rel}): ${only_released}"
+
+if [ "$age" -lt "$WARN" ]; then
+    echo "PLUGIN DRIFT OK - drift $(dur "$age"), within grace (warn after $(dur "$WARN")): ${total} differ from the released image:${detail}| $PERFDATA"
+    exit 0
+fi
+
+echo "PLUGIN DRIFT WARNING - drift $(dur "$age"): ${total} differ from the released image:${detail}| $PERFDATA"
 exit 1

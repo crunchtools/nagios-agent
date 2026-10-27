@@ -33,6 +33,15 @@
 # and hermes pages on CRITICAL only (contacts.cfg, service_notification_options
 # c). This should nag from the dashboard, not wake anyone.
 #
+# GRACE (7.0.0). A release is missing from a registry for a while by design:
+# the tag lands on GitHub, CI builds, Quay gets the image, then GHCR. Warning
+# in that window was noise, so a "missing" image is dated and stays OK for
+# REGISTRY_DRIFT_WARN seconds (4h). The date comes from what can be read
+# without a token or state: Quay's start_ts for the tag when Quay has it (the
+# gap is GHCR, which follows Quay), else the Created time of a local image
+# carrying that tag (podman socket), else none, which counts as aged and warns
+# at once as before. "untagged" has no release to date and always warns.
+#
 # HONESTY RULE (RT #1481, RT #1488). Never report OK for a comparison that did
 # not happen. Every git or registry call that fails is counted as unknown and
 # named in the output. A check that reports OK when it did not run is worse
@@ -46,6 +55,8 @@ GHCR=${GHCR:-https://ghcr.io}
 ORG=${REGISTRY_DRIFT_ORG:-crunchtools}
 GIT_HOST=${REGISTRY_DRIFT_GIT_HOST:-https://github.com}
 NET_TIMEOUT=${REGISTRY_DRIFT_TIMEOUT:-15}
+WARN=${REGISTRY_DRIFT_WARN:-14400}
+SOCK=${REGISTRY_DRIFT_SOCK:-/run/podman/podman.sock}
 
 # Bare `git ls-remote` against anything it cannot read BLOCKS on a credential
 # prompt rather than failing. Unset, this plugin hangs until NRPE gives up and
@@ -86,12 +97,38 @@ tag_present() {
     printf '%s\n' "$tags" | grep -qxF "v$want"
 }
 
-quay_tags() {
-    local img=$1 body
-    body=$(curl -sf --max-time "$NET_TIMEOUT" \
-        "${QUAY_API}/repository/${ORG}/${img}/tag/?onlyActiveTags=true&limit=100") || return 1
-    printf '%s' "$body" | grep -oP '"name":\s*"\K[^"]+'
-    return 0
+quay_body() {
+    curl -sf --max-time "$NET_TIMEOUT" \
+        "${QUAY_API}/repository/${ORG}/$1/tag/?onlyActiveTags=true&limit=100"
+}
+
+quay_names() { printf '%s' "$1" | grep -oP '"name":\s*"\K[^"]+'; }
+
+# start_ts of tag <want> (or v<want>) in a Quay tag listing. Tag objects can
+# nest (child_manifests_presence), so split the listing at each tag's "name"
+# key rather than at braces: each piece is then one tag's fields.
+quay_start() {
+    printf '%s' "$1" | sed 's/{"name"/\n{"name"/g' \
+        | grep -E "^\{\"name\":\s*\"v?${2//./\\.}\"" \
+        | grep -oP '"start_ts":\s*\K[0-9]+' | head -1
+}
+
+# Created epoch of a local image tagged <img>:<tag> on either registry, from
+# the image list fetched once into $LOCAL_IMAGES. sqlite3 reads the JSON (the
+# image has no jq); <img> is checked against a strict pattern before it is
+# spliced into the query, and <tag> is semver digits by construction.
+local_created() {
+    local img=$1 tag=$2 refs="" r
+    [ -s "${LOCAL_IMAGES:-}" ] || return 0
+    command -v sqlite3 >/dev/null || return 0
+    [[ $img =~ ^[a-z0-9._-]+$ && $tag =~ ^[0-9.]+$ ]] || return 0
+    for r in "quay.io/${ORG}/${img}" "ghcr.io/${ORG}/${img}"; do
+        refs="${refs:+$refs,}'$r:$tag','$r:v$tag'"
+    done
+    sqlite3 :memory: "SELECT coalesce(max(json_extract(i.value,'\$.Created')),'')
+        FROM json_each(CAST(readfile('$LOCAL_IMAGES') AS TEXT)) i,
+             json_each(i.value,'\$.RepoTags') t
+        WHERE t.value IN ($refs)" 2>/dev/null | grep -E '^[0-9]+$'
 }
 
 ghcr_tags() {
@@ -113,7 +150,7 @@ ghcr_tags() {
 # the images can be checked concurrently; the verdicts are tallied afterwards by
 # a single reader, which keeps the counting logic sequential and easy to follow.
 check_one() {
-    local repo=$1 img=$2 flag=${3:-} tag gaps qt gt
+    local repo=$1 img=$2 flag=${3:-} tag gaps qb qt gt since
 
     # A fork's git tags are upstream's releases, not versions of the image we
     # publish, so there is nothing here to compare. Quay staleness covers them.
@@ -134,7 +171,8 @@ check_one() {
 
     gaps=""
 
-    if qt=$(quay_tags "$img"); then
+    if qb=$(quay_body "$img"); then
+        qt=$(quay_names "$qb")
         tag_present "$qt" "$tag" || gaps="quay"
     else
         printf 'UNKNOWN %s(quay)\n' "$img"
@@ -149,13 +187,25 @@ check_one() {
     fi
 
     if [ -n "$gaps" ]; then
-        printf 'MISSING %s:%s[%s]\n' "$img" "$tag" "$gaps"
+        since=""
+        [ "$gaps" = ghcr ] && since=$(quay_start "$qb" "$tag")
+        [ -n "$since" ] || since=$(local_created "$img" "$tag")
+        printf 'MISSING %s:%s[%s] %s\n' "$img" "$tag" "$gaps" "${since:-0}"
     else
         printf 'CLEAN\n'
     fi
 }
-export -f check_one newest_tag quay_tags ghcr_tags tag_present
-export QUAY_API GHCR ORG GIT_HOST NET_TIMEOUT
+export -f check_one newest_tag quay_body quay_names quay_start local_created ghcr_tags tag_present
+
+# One read of the local image list for local_created(). Failure just means no
+# local dates, so every missing image without a Quay date counts as aged.
+LOCAL_IMAGES=$(mktemp) || LOCAL_IMAGES=""
+trap '[ -n "$LOCAL_IMAGES" ] && rm -f "$LOCAL_IMAGES"' EXIT
+if [ -n "$LOCAL_IMAGES" ] && [ -S "$SOCK" ]; then
+    curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
+        "http://localhost/v5.0.0/libpod/images/json" > "$LOCAL_IMAGES" 2>/dev/null || : > "$LOCAL_IMAGES"
+fi
+export QUAY_API GHCR ORG GIT_HOST NET_TIMEOUT LOCAL_IMAGES
 
 # Run the images concurrently. Serially this made ~170 network calls back to
 # back and took ~39s against check_nrpe's 45s ceiling -- 86% of the budget, so
@@ -176,14 +226,26 @@ results=$(grep -vE '^[[:space:]]*(#|$)' "$CONF" \
     | sort)
 
 untagged=""; missing=""; unknown=""; clean=0; total=0; skipped=0
-seen_untagged=""
+seen_untagged=""; grace=""; now=$(date +%s); oldest_age=-1
 
-while read -r kind value; do
+dur() { if [ "$1" -ge 3600 ]; then echo "$(( $1 / 3600 ))h"; else echo "$(( $1 / 60 ))m"; fi; }
+
+while read -r kind value since; do
     case "$kind" in
         SKIPPED) skipped=$((skipped + 1)) ;;
         CLEAN)   clean=$((clean + 1));    total=$((total + 1)) ;;
         UNKNOWN) unknown="$unknown $value"; total=$((total + 1)) ;;
-        MISSING) missing="$missing $value"; total=$((total + 1)) ;;
+        MISSING)
+            total=$((total + 1))
+            age=$WARN
+            [ "${since:-0}" -gt 0 ] 2>/dev/null && age=$(( now - since ))
+            [ "$age" -lt 0 ] && age=0
+            if [ "$age" -lt "$WARN" ]; then
+                grace="$grace $value"
+                [ "$age" -gt "$oldest_age" ] && oldest_age=$age
+            else
+                missing="$missing $value"
+            fi ;;
         UNTAGGED)
             total=$((total + 1))
             # Count the repo once even when it publishes several images; the fix
@@ -199,14 +261,16 @@ done <<< "$results"
 n_untagged=$(printf '%s' "$untagged" | wc -w)
 n_missing=$(printf '%s' "$missing" | wc -w)
 n_unknown=$(printf '%s' "$unknown" | wc -w)
+n_grace=$(printf '%s' "$grace" | wc -w)
 drift=$((n_untagged + n_missing))
 
-perf="untagged=${n_untagged};;;0 missing=${n_missing};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 skipped=${skipped};;;0"
+perf="untagged=${n_untagged};;;0 missing=${n_missing};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 skipped=${skipped};;;0 in_grace=${n_grace};;;0"
 
 detail=""
 [ -n "$untagged" ] && detail="${detail}untagged:${untagged}. "
 [ -n "$missing" ] && detail="${detail}missing:${missing}. "
 [ -n "$unknown" ] && detail="${detail}unreadable:${unknown}. "
+[ -n "$grace" ] && detail="${detail}in grace:${grace}. "
 
 # How unreadable images are handled, since the honest answer is not simply
 # "always UNKNOWN". This makes ~56 network calls per run against three external
@@ -229,6 +293,11 @@ fi
 if [ "$n_unknown" -gt "$blind_limit" ]; then
     echo "REGISTRY DRIFT UNKNOWN - ${n_unknown}/${total} images could not be checked, too many to trust the rest. ${detail}| $perf"
     exit $UNKNOWN
+fi
+
+if [ "$drift" -eq 0 ] && [ "$n_grace" -gt 0 ]; then
+    echo "REGISTRY DRIFT OK - drift $(dur "$oldest_age"), within grace (warn after $(dur "$WARN")): ${n_grace}/${total} images not yet on every registry. ${detail}| $perf"
+    exit $OK
 fi
 
 if [ "$drift" -eq 0 ]; then

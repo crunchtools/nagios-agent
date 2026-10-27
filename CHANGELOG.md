@@ -6,6 +6,61 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-10-26
+
+### Changed
+
+- **Breaking (thresholds):** drift checks get a 4h grace, so a deploy in
+  progress is no longer an alert. The age of the drift is computed statelessly
+  from mtimes and the verdict is OK "drift <age>, within grace (warn after
+  4h)" until any drifted item is older than WARN (14400s), then WARNING as
+  before.
+  - `check_git_drift.sh`: default WARN raised from 3600 to 14400; CRIT stays
+    24h.
+  - `check_unit_drift.sh`: was WARNING on any difference. Each unit is dated by
+    the newer mtime of its /etc and /srv copies (an unbacked unit by its /etc
+    copy); `srv-drift-collect.sh` emits the oldest as `unit_drift_since`. `WARN`
+    env overrides.
+  - `check_plugin_drift.sh`: was WARNING on any difference. Each differing
+    plugin is dated by its mtime in the scripts dir, a removed one by the dir's
+    mtime. `PLUGIN_DRIFT_WARN` overrides.
+  - `check_registry_drift.sh`: a tag missing from a registry is dated by
+    Quay's `start_ts` when only GHCR lags, else by the Created time of a local
+    image carrying the tag, else counts as aged. Untagged repos still warn at
+    once. `REGISTRY_DRIFT_WARN` overrides; perfdata gains `in_grace`.
+- **Breaking (behaviour):** `check_backup_freshness.sh` and
+  `check_personal_backup_freshness.sh` no longer read pCloud. They judge the
+  status files `backup-freshness-collect.sh` writes, with the same thresholds,
+  and go UNKNOWN only as "collector stale": the file is missing or over 2h
+  old, or a sentinel has not been read for 2h. Perfdata gains
+  `collected_age`.
+- `deploy/nagios/*.cfg`: every NRPE service uses the new pool templates,
+  `nrpe-fast-service[-slow]` for `check_nrpe_command!` and
+  `nrpe-ctr-service[-slow]` for `check_nrpe_ctr!`, matching lotor.
+- `deploy/nagios/git-drift.cfg` and `unit-drift.cfg` are now carried here. The
+  git-drift header no longer says it reads a status file from
+  `srv-git-drift.timer`; that timer has been gone since RT #1477. Stale
+  comments in `nrpe-host.cfg` are fixed to match.
+
+### Added
+
+- `backup-freshness-collect.sh servers|personal`: does the pCloud reads with a
+  120s budget (30s a listing, one retry; 60s for the markers) and writes the
+  status file atomically to `/var/lib/nagios-agent`. A listing that times out
+  keeps the previous real answer, so one slow read is no longer an alert. A
+  flock stops overlapping runs. No timer: the checks start it through the new
+  `podman_exec.sh --detach` when their status file is over 20m old, so the
+  Nagios check interval is the clock (constitution XVI).
+- The host agent unit bind-mounts `/srv/nagios-agent.crunchtools.com/data` at
+  `/var/lib/nagios-agent`, so the status files survive a container recreate.
+  The image creates the directory.
+
+### Fixed
+
+- `check_container_postgres.sh`: `pg_isready` exiting 127 (not in the image)
+  is UNKNOWN "pg_isready missing from image <container>", not CRITICAL "not
+  accepting connections".
+
 ## [6.5.0] - 2026-10-26
 
 ### Added

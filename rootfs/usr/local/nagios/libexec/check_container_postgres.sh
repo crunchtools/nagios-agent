@@ -13,15 +13,25 @@ if [ -z "$CONTAINER" ]; then
     exit 3
 fi
 
-READY=$(/usr/local/nagios/libexec/podman_exec.sh "$CONTAINER" pg_isready -h localhost -p "$PORT" 2>&1)
+PODMAN_EXEC=${PODMAN_EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
+
+READY=$("$PODMAN_EXEC" "$CONTAINER" pg_isready -h localhost -p "$PORT" 2>&1)
 RC=$?
+
+# 127 is the shell's "command not found": the image has no pg_isready, which
+# says nothing about whether PostgreSQL is up. That is a monitoring gap to fix
+# in the image or the check, not a database outage, so it must not page.
+if [ $RC -eq 127 ]; then
+    echo "UNKNOWN - pg_isready missing from image $CONTAINER"
+    exit 3
+fi
 
 if [ $RC -ne 0 ]; then
     echo "CRITICAL - PostgreSQL in $CONTAINER not accepting connections: $READY"
     exit 2
 fi
 
-CONNS=$(/usr/local/nagios/libexec/podman_exec.sh "$CONTAINER" psql -U postgres -h localhost -p "$PORT" -t -A \
+CONNS=$("$PODMAN_EXEC" "$CONTAINER" psql -U postgres -h localhost -p "$PORT" -t -A \
     -c "SELECT count(*) FROM pg_stat_activity WHERE state IS NOT NULL" 2>/dev/null)
 
 if [ -z "$CONNS" ]; then

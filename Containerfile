@@ -77,6 +77,8 @@ RUN chmod +x /usr/local/nagios/libexec/*.sh
 #
 # Must stay AFTER the chmod so modes match and only real content drift reports.
 RUN cp -a /usr/local/nagios/libexec /usr/local/nagios/libexec-released
+# State for backup-freshness-collect.sh; lotor bind-mounts /srv/<agent>/data here.
+RUN mkdir -p /var/lib/nagios-agent && chmod 0755 /var/lib/nagios-agent
 
 EXPOSE 5666
 
