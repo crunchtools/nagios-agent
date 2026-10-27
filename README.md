@@ -69,6 +69,8 @@ daemon is the sole witness to its own death.
    | `cloudflare-collect.sh` | CF zones, Cloudflare global status | 2m / 10m |
    | `quay-collect.sh` | Quay staleness | 2m / 10m |
    | `registry-drift-collect.sh` | Registry drift | 30m / 3h |
+   | `deploy-drift-collect.sh` | Deploy drift | 30m / 3h |
+   | `config-drift-repos-collect.sh` | Config drift cross-repo | 30m / 3h |
    | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
 8. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy

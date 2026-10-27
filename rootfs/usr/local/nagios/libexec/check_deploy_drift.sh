@@ -38,15 +38,24 @@
 # unreadable, or when more than half was; otherwise report the drift found with
 # the unreadable count in the headline.
 #
+# COLLECTOR (7.2.0). Listing the containers and asking Quay now happens in
+# deploy-drift-collect.sh, which writes deploy-drift.status; this plugin only
+# judges that file, so a slow Quay can no longer time the check out. When the
+# file is missing or older than REFRESH (30m, under the 60m check_interval)
+# the collector is started detached through `podman_exec.sh --detach` in
+# nagios-agent-ctr.crunchtools.com and the previous run's file is judged. A
+# container the collector last read more than STALE (3h) ago counts as
+# unreadable, and the whole check is UNKNOWN "collector stale" when the file
+# is missing or older than STALE. The grace is applied here, at judging time,
+# to the tag date the collector recorded, so grace_hours stays this plugin's
+# argument.
+#
 # Usage: check_deploy_drift.sh [grace_hours]
 
 set -uo pipefail
 
 GRACE_HOURS=${1:-30}
 SOCK=${PODMAN_SOCK:-/run/podman/podman.sock}
-QUAY_API=${QUAY_API:-https://quay.io/api/v1}
-NET_TIMEOUT=${DEPLOY_DRIFT_TIMEOUT:-15}
-PREFIX="quay.io/crunchtools/"
 
 OK=0; WARNING=1; UNKNOWN=3
 
@@ -55,71 +64,43 @@ if ! [[ "$GRACE_HOURS" =~ ^[0-9]+$ ]]; then
     exit $UNKNOWN
 fi
 
-ids=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
-    "http://localhost/v5.0.0/libpod/containers/json") || {
-    echo "DEPLOY DRIFT UNKNOWN - cannot list containers on ${SOCK}"
-    exit $UNKNOWN
-}
-ids=$(printf '%s' "$ids" | grep -oP '"Id":"\K[0-9a-f]{64}')
-[ -n "$ids" ] || {
-    echo "DEPLOY DRIFT UNKNOWN - podman listed no running containers"
-    exit $UNKNOWN
-}
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "DEPLOY DRIFT UNKNOWN - cannot load collector-lib.sh"; exit $UNKNOWN; }
+STATUS=${STATUS:-$STATE_DIR/deploy-drift.status}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/deploy-drift-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent-ctr.crunchtools.com}
+REFRESH=${REFRESH:-1800}
+STALE=${STALE:-10800}
 
-# One container in, one verdict line out. Workers run concurrently and each
-# prints a single short line, so the verdicts cannot interleave.
-check_one() {
-    local id=$1 raw name ref auto have img tag body want start
-    raw=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
-        "http://localhost/v5.0.0/libpod/containers/${id}/json") || {
-        printf 'UNKNOWN %s\n' "${id:0:12}"; return
-    }
-    name=$(printf '%s' "$raw" | grep -oP '"Name":\s*"\K[^"]+' | head -1)
-    ref=$(printf '%s' "$raw" | grep -oP '"ImageName":\s*"\K[^"]+' | head -1)
-    case "$ref" in "$PREFIX"*) ;; *) printf 'IGNORED\n'; return ;; esac
-    case "$ref" in *@sha256:*) printf 'PINNED\n'; return ;; esac
+cl_open DDRIFT "DEPLOY DRIFT"
+case "$(cl_field error "$(grep -m1 '^DDRIFT generated=' <<< "$CL_RAW")")" in
+    list_failed)   echo "DEPLOY DRIFT UNKNOWN - cannot list containers on ${SOCK}"; exit $UNKNOWN ;;
+    no_containers) echo "DEPLOY DRIFT UNKNOWN - podman listed no running containers"; exit $UNKNOWN ;;
+    '') ;;
+    *)             echo "DEPLOY DRIFT UNKNOWN - collector reported an unrecognised error"; exit $UNKNOWN ;;
+esac
 
-    auto=$(printf '%s' "$raw" | grep -oP '"io\.containers\.autoupdate":\s*"\K[^"]+' | head -1)
-    if [ "$auto" != "registry" ]; then
-        printf 'UNMANAGED %s\n' "$name"; return
-    fi
-
-    have=$(printf '%s' "$raw" | grep -oP '"ImageDigest":\s*"\K[^"]+' | head -1)
-    img=${ref#"$PREFIX"}; tag=latest
-    case "$img" in *:*) tag=${img##*:}; img=${img%:*} ;; esac
-
-    body=$(curl -sf --max-time "$NET_TIMEOUT" \
-        "${QUAY_API}/repository/crunchtools/${img}/tag/?specificTag=${tag}&onlyActiveTags=true") || {
-        printf 'UNKNOWN %s\n' "$name"; return
-    }
-    want=$(printf '%s' "$body" | grep -oP '"manifest_digest":\s*"\K[^"]+' | head -1)
-    start=$(printf '%s' "$body" | grep -oP '"start_ts":\s*\K[0-9]+' | head -1)
-    if [ -z "$want" ] || [ -z "$start" ] || [ -z "$have" ]; then
-        printf 'UNKNOWN %s\n' "$name"; return
-    fi
-
-    if [ "$have" = "$want" ] || [ $(( $(date +%s) - start )) -lt $((GRACE_HOURS * 3600)) ]; then
-        printf 'CLEAN\n'
-    else
-        printf 'STALE %s\n' "$name"
-    fi
-}
-export -f check_one
-export SOCK QUAY_API NET_TIMEOUT PREFIX GRACE_HOURS
-
-results=$(printf '%s\n' "$ids" | xargs -P "${DEPLOY_DRIFT_JOBS:-8}" -L1 bash -c 'check_one "$@"' _ | sort)
-
+now=$(date +%s)
+grace=$((GRACE_HOURS * 3600))
 unmanaged=""; stale=""; unknown=""; clean=0; pinned=0
 
-while read -r kind value; do
+while IFS= read -r line; do
+    kind=$(cl_field kind "$line"); name=$(cl_field name "$line")
+    seen=$(cl_field seen "$line"); since=$(cl_field since "$line")
+    # An answer older than STALE is not judged: it counts as unreadable.
+    if [ $(( now - ${seen:-0} )) -ge "$STALE" ]; then
+        case "$kind" in IGNORED) continue ;; esac
+        unknown="$unknown ${name:-$(cl_field item "$line")}(stale)"
+        continue
+    fi
     case "$kind" in
-        CLEAN)     clean=$((clean + 1)) ;;
+        CURRENT)   clean=$((clean + 1)) ;;
+        BEHIND)    if [ $(( now - ${since:-0} )) -lt "$grace" ]; then clean=$((clean + 1)); else stale="$stale $name"; fi ;;
         PINNED)    pinned=$((pinned + 1)) ;;
-        UNMANAGED) unmanaged="$unmanaged $value" ;;
-        STALE)     stale="$stale $value" ;;
-        UNKNOWN)   unknown="$unknown $value" ;;
+        UNMANAGED) unmanaged="$unmanaged $name" ;;
+        UNKNOWN)   unknown="$unknown $name" ;;
     esac
-done <<< "$results"
+done < <(grep '^DDRIFT item=' <<< "$CL_RAW" | sort -t= -k5)
 
 n_unmanaged=$(printf '%s' "$unmanaged" | wc -w)
 n_stale=$(printf '%s' "$stale" | wc -w)
@@ -127,12 +108,13 @@ n_unknown=$(printf '%s' "$unknown" | wc -w)
 drift=$((n_unmanaged + n_stale))
 total=$((drift + n_unknown + clean))
 
-perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0"
+perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0 collected_age=${CL_AGE}s;;${STALE}"
 
 detail=""
 [ -n "$unmanaged" ] && detail="${detail}unmanaged (no autoupdate label):${unmanaged}. "
 [ -n "$stale" ] && detail="${detail}stale (auto-update not applying):${stale}. "
 [ -n "$unknown" ] && detail="${detail}unreadable:${unknown}. "
+[ -n "$CL_KICKED" ] && detail="${detail}${CL_KICKED# }. "
 
 if [ "$n_unknown" -gt 0 ] && [ "$drift" -eq 0 ]; then
     echo "DEPLOY DRIFT UNKNOWN - ${n_unknown}/${total} containers could not be checked. ${detail}| $perf"

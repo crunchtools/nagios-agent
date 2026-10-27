@@ -446,3 +446,15 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/google-oauth-collect.sh"
 justification = "Not an NRPE plugin: the slow half of the 7.1.0 Google OAuth split. check_google_oauth.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/deploy-drift-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.2.0 deploy drift split (constitution XVI). check_deploy_drift.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/config-drift-repos-collect.sh"
+justification = "Not an NRPE plugin: the slow half of the 7.2.0 cross-repo config drift split (constitution XVI). check_config_drift.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
+classification = "by_design"

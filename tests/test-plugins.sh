@@ -1,9 +1,9 @@
 #!/bin/bash
 # Offline tests for the exec-free container plugins (RT #1513), the
 # collector + status-file checks (backups, Cloudflare, Quay, registry drift,
-# Google OAuth) and the Cloudflare component filter. curl, rclone and
-# podman_exec.sh are stubbed, so this runs anywhere with bash and GNU grep -P,
-# no Podman socket needed.
+# deploy drift, config drift, Google OAuth) and the Cloudflare component
+# filter. curl, rclone and podman_exec.sh are stubbed, so this runs anywhere
+# with bash, git and GNU grep -P, no Podman socket needed.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -545,10 +545,18 @@ else
     rm -rf "$TD"
 fi
 
-echo "=== check_deploy_drift ==="
-# The plugin greps fields out of the socket JSON, so one stub body serves both
-# the container list (Id) and the per-container inspect (the rest).
+echo "=== deploy-drift-collect + check_deploy_drift ==="
+# The collector greps fields out of the socket JSON, so one stub body serves
+# both the container list (Id) and the per-container inspect (the rest).
 DD="$LIBEXEC/check_deploy_drift.sh"
+DDC="$LIBEXEC/deploy-drift-collect.sh"
+DDSTATE="$(mktemp -d)"
+DDSTAT="$DDSTATE/deploy-drift.status"
+cat > "$STUBS/kick" <<'STUB'
+#!/bin/bash
+echo "$*" > "$STUB_EXEC_MARK"
+STUB
+chmod +x "$STUBS/kick"
 ID=$(printf 'a%.0s' $(seq 64))
 OLD_TS=$(( $(date +%s) - 40 * 3600 ))
 ctr() { # <image-ref> <autoupdate> <digest>
@@ -556,24 +564,119 @@ ctr() { # <image-ref> <autoupdate> <digest>
         "$ID" "$1" "$3" "$2"
 }
 quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}]}' "$1" "$2"; }
+# ddcol: one collector run; ddchk: judge its file; dd: both, from scratch
+ddcol() { STATE_DIR="$DDSTATE" "$DDC"; }
+ddchk() { STATE_DIR="$DDSTATE" EXEC="$STUBS/kick" COLLECT=/collector "$DD" "$@"; }
+dd() { rm -f "$DDSTAT"; ddcol; ddchk "$@"; }
 LATEST=quay.io/crunchtools/svc:latest
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") \
-    expect "running digest matches Quay is OK" 0 "^DEPLOY DRIFT OK - 1/1 " any -- "$DD"
+    expect "running digest matches Quay is OK" 0 "^DEPLOY DRIFT OK - 1/1 .*collected_age=" no -- dd
 STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
-    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale\. unmanaged \(no autoupdate label\): svc" any -- "$DD"
+    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale\. unmanaged \(no autoupdate label\): svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
-    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" any -- "$DD"
+    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$(date +%s)") \
-    expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " any -- "$DD"
+    expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
+expect "the grace is the plugin argument, applied at judging time" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- ddchk 0
 STUB_SOCK=$(ctr quay.io/crunchtools/svc@sha256:aa "" sha256:aa) \
-    expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" any -- "$DD"
+    expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" no -- dd
 STUB_SOCK=$(ctr ghcr.io/other/svc:latest "" sha256:aa) \
-    expect "third-party image is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " any -- "$DD"
+    expect "third-party image is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
-    expect "Quay unreadable is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" any -- "$DD"
-STUB_SOCK_RC=7 \
-    expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" any -- "$DD"
-expect "non-numeric grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - grace_hours" any -- "$DD" soon
+    expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" no -- dd
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") dd >/dev/null
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 ddcol
+expect "an unreadable Quay keeps the last answer" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" no -- ddchk
+sed -i -E "/item=/s/seen=[0-9]+/seen=$(( $(date +%s) - 11000 ))/" "$DDSTAT"
+expect "an answer older than STALE counts as unreadable" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc\\(stale\\)" no -- ddchk
+STUB_SOCK_RC=7 expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" no -- dd
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") dd >/dev/null
+STUB_SOCK_RC=7 ddcol 2>/dev/null
+expect "a failed listing keeps the previous file" 0 "^DEPLOY DRIFT OK - 1/1 " no -- ddchk
+STUB_SOCK='[]' expect "no running containers is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - podman listed no running containers" no -- dd
+expect "non-numeric grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - grace_hours" no -- ddchk soon
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") ddcol
+age_ddstat() { local t=$(( $(date +%s) - $1 )); sed -i -E "s/generated=[0-9]+/generated=$t/; s/seen=[0-9]+/seen=$t/g" "$DDSTAT"; }
+age_ddstat 2000
+expect "status past REFRESH is still judged and starts the collector" 0 "^DEPLOY DRIFT OK - 1/1 " yes -- ddchk
+age_ddstat 11000
+expect "status past STALE is UNKNOWN collector stale" 3 "^DEPLOY DRIFT UNKNOWN - collector stale: last collection 3h" yes -- ddchk
+rm -f "$DDSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^DEPLOY DRIFT UNKNOWN - collector stale: no status file .*collector started" yes -- ddchk
+grep -q -- '--detach nagios-agent-ctr.crunchtools.com /collector' "$STUB_EXEC_MARK" \
+    && { echo "  PASS: kick is a detached exec in the ctr agent"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+rm -rf "$DDSTATE"
+
+echo "=== config-drift-repos-collect + check_config_drift ==="
+# Real git throughout: a /srv-shaped repo for the fingerprint (run through an
+# exec stub that drops the container name), and rival repos served from a
+# file:// "GitHub".
+CD="$LIBEXEC/check_config_drift.sh"
+CDC="$LIBEXEC/config-drift-repos-collect.sh"
+CW="$(mktemp -d)"
+CDSTATE="$CW/state"; CDSTAT="$CDSTATE/config-drift.status"; mkdir -p "$CDSTATE"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+cat > "$CW/fpexec" <<'STUB'
+#!/bin/bash
+[ -n "${STUB_FP_FAIL:-}" ] && exit 3
+shift; exec "$@"
+STUB
+chmod +x "$CW/fpexec"
+# /srv: svc/config/app.conf deployed and pushed.
+git init -q "$CW/srv"; mkdir -p "$CW/srv/svc/config"
+echo 'listen 80' > "$CW/srv/svc/config/app.conf"
+git -C "$CW/srv" add -A; git -C "$CW/srv" commit -qm srv
+git -C "$CW/srv" update-ref refs/remotes/origin/master HEAD
+rival() { # <content of deploy/app.conf in the rival repo>
+    rm -rf "$CW/gh/org/rival"; git init -q "$CW/gh/org/rival"; mkdir -p "$CW/gh/org/rival/deploy"
+    echo "$1" > "$CW/gh/org/rival/deploy/app.conf"
+    git -C "$CW/gh/org/rival" add -A; git -C "$CW/gh/org/rival" commit -qm r
+}
+echo 'svc rival' > "$CW/sources.conf"
+cdcol() {
+    STATE_DIR="$CDSTATE" EXEC="$CW/fpexec" FINGERPRINT="$LIBEXEC/config-drift-collect.sh" \
+        CONFIG_DRIFT_REPO="$CW/srv" CONFIG_DRIFT_CONF="$CW/sources.conf" \
+        CONFIG_DRIFT_GIT_HOST="file://$CW/gh" CONFIG_DRIFT_ORG=org "$CDC" 2>/dev/null
+}
+cdchk() { STATE_DIR="$CDSTATE" EXEC="$CW/kick" COLLECT=/collector CONFIG_DRIFT_CONF="$CW/sources.conf" "$CD"; }
+cd_() { rm -f "$CDSTAT"; cdcol; cdchk; }
+cp "$STUBS/kick" "$CW/kick"
+rival 'listen 80'
+expect "rival copy that matches is OK (duplicate)" 0 "^CONFIG DRIFT OK - 1 deployed config file\\(s\\), none with a divergent second git home \\|.*duplicate=1;.*collected_age=" no -- cd_
+rival 'listen 8080'
+expect "divergent rival copy is WARNING" 1 "^CONFIG DRIFT WARNING - 1/1 deployed config file\\(s\\) have a divergent second git home\\. divergent: rival/deploy/app.conf" no -- cd_
+CONFIG_DRIFT_MAX_DIVERGENT=1 expect "the ratchet stays in the plugin" 0 "^CONFIG DRIFT OK - 1 divergent, at or under the ratchet of 1" no -- cdchk
+echo 'listen 81' > "$CW/srv/svc/config/app.conf"
+expect "unpublished AND divergent is CRITICAL" 2 "^CONFIG DRIFT CRITICAL - 1 deployed file\\(s\\) differ from origin/master AND from a rival git home" no -- cd_
+echo 'listen 80' > "$CW/srv/svc/config/app.conf"
+mv "$CW/gh/org/rival" "$CW/gh/org/gone"
+cdcol
+expect "a failed clone keeps the last good tree" 1 "^CONFIG DRIFT WARNING - 1/1 .*divergent: rival/deploy/app.conf" no -- cdchk
+printf '0\n' > "$CDSTATE/config-drift-repos/rival.seen"; cdcol
+expect "a repo last read past STALE is unreadable, its findings dropped" 3 "^CONFIG DRIFT UNKNOWN - 1 project repo\\(s\\) could not be read, nothing to compare against\\. unreadable: rival" no -- cdchk
+rm -rf "$CDSTATE/config-drift-repos"
+expect "a repo never read is UNKNOWN" 3 "^CONFIG DRIFT UNKNOWN - 1 project repo\\(s\\) could not be read" no -- cd_
+mv "$CW/gh/org/gone" "$CW/gh/org/rival"
+printf 'svc rival\nother none\n' > "$CW/sources.conf"; mkdir -p "$CW/srv/new/config"; echo x > "$CW/srv/new/config/x.conf"
+git -C "$CW/srv" add -A; git -C "$CW/srv" commit -qm new; git -C "$CW/srv" update-ref refs/remotes/origin/master HEAD
+expect "an unmapped service is named in the headline" 1 "^CONFIG DRIFT WARNING - 1/2 .*, 1 service\\(s\\) UNMAPPED\\. .*unmapped: new" no -- cd_
+cdcol; STUB_FP_FAIL=1 cdcol
+expect "a failed fingerprint exec keeps the previous file" 1 "^CONFIG DRIFT WARNING - 1/2 " no -- cdchk
+rm -f "$CDSTAT"; STUB_FP_FAIL=1 cdcol
+expect "a failed fingerprint with no previous file says why" 3 "^CONFIG DRIFT UNKNOWN - collector reported: fingerprint exec in nagios-agent.crunchtools.com exited 3" no -- cdchk
+rm -f "$CDSTAT"; STATE_DIR="$CDSTATE" CONFIG_DRIFT_CONF=/nonexistent "$CDC"
+expect "unreadable source map is UNKNOWN" 3 "^CONFIG DRIFT UNKNOWN - cannot read source map" no -- cdchk
+cdcol; sed -i -E "s/generated=[0-9]+/generated=$(( $(date +%s) - 2000 ))/" "$CDSTAT"
+expect "status past REFRESH is still judged and starts the collector" 1 "^CONFIG DRIFT WARNING" yes -- cdchk
+sed -i -E "s/generated=[0-9]+/generated=$(( $(date +%s) - 11000 ))/" "$CDSTAT"
+expect "status past STALE is UNKNOWN collector stale" 3 "^CONFIG DRIFT UNKNOWN - collector stale: last collection 3h" yes -- cdchk
+rm -f "$CDSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^CONFIG DRIFT UNKNOWN - collector stale: no status file .*collector started" yes -- cdchk
+grep -q -- '--detach nagios-agent-ctr.crunchtools.com /collector' "$STUB_EXEC_MARK" \
+    && { echo "  PASS: kick is a detached exec in the ctr agent"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+rm -rf "$CW"
 
 echo "=== check_git_drift (grace) ==="
 GD="$LIBEXEC/check_git_drift.sh"

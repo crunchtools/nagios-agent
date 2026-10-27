@@ -99,29 +99,22 @@
 # OK for a comparison that did not happen. A repo that could not be read is
 # counted as unchecked and named in the HEADLINE, not buried in the detail, and
 # UNKNOWN wins when nothing drifted but something was unreadable.
+#
+# COLLECTOR (7.2.0). Both reads -- the fingerprint from
+# nagios-agent.crunchtools.com and the clones -- and the matching above now
+# happen in config-drift-repos-collect.sh, which writes config-drift.status;
+# this plugin only judges that file, so a slow GitHub can no longer time the
+# check out. When the file is missing or older than REFRESH (30m, under the
+# 60m check_interval) the collector is started detached through
+# `podman_exec.sh --detach` in nagios-agent-ctr.crunchtools.com and the
+# previous run's file is judged. A repo whose last successful clone is older
+# than STALE (3h) counts as unreadable and its findings are dropped, and the
+# whole check is UNKNOWN "collector stale" when the file is missing or older
+# than STALE. The ratchet and the CRITICAL ladder stay here.
 
 set -uo pipefail
 
-EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
-COLLECT=${COLLECT:-/usr/local/nagios/libexec/config-drift-collect.sh}
-CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 CONF=${CONFIG_DRIFT_CONF:-/etc/nagios/config-sources.conf}
-ORG=${CONFIG_DRIFT_ORG:-crunchtools}
-GIT_HOST=${CONFIG_DRIFT_GIT_HOST:-https://github.com}
-# THE TIME BUDGET, measured rather than guessed. This runs on the HOST nrpe
-# daemon, whose command_timeout is 15s (nrpe-host.cfg) -- a quarter of the 60s
-# the container daemon allows, and deliberately so. Thirty-odd anonymous clones
-# at 8-way ran 2s, 3s, 7s and 15s on four consecutive tries; the last one hit
-# the ceiling exactly and came back as "NRPE: Command timed out" with no
-# detail. At 16-way the same work is a consistent 2s, because the cost is
-# round trips and not CPU.
-#
-# NET_TIMEOUT must stay UNDER command_timeout for the same reason. A per-clone
-# bound longer than the daemon's is not a bound at all: the daemon kills the
-# check first and the honesty machinery below -- which would have named the
-# repo it could not read -- never gets to run.
-NET_TIMEOUT=${CONFIG_DRIFT_TIMEOUT:-10}
-JOBS=${CONFIG_DRIFT_JOBS:-16}
 
 # Ratchet, per the lesson in factory-status.cfg and the note at the end of
 # registry-drift.cfg: a check that is permanently amber is not honest, it is
@@ -130,265 +123,77 @@ JOBS=${CONFIG_DRIFT_JOBS:-16}
 # tolerated silently.
 MAX_DIVERGENT=${CONFIG_DRIFT_MAX_DIVERGENT:-0}
 
-# Bare git against something it cannot read BLOCKS on a credential prompt
-# rather than failing, and the check then goes UNKNOWN with no detail when NRPE
-# gives up. Refuse the prompt, and bound every call with timeout regardless.
-export GIT_TERMINAL_PROMPT=0
-export GIT_ASKPASS=/bin/true
-
 OK=0; WARNING=1; CRITICAL=2; UNKNOWN=3
 
-[ -r "$CONF" ] || { echo "CONFIG DRIFT UNKNOWN - cannot read source map at ${CONF}"; exit $UNKNOWN; }
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "CONFIG DRIFT UNKNOWN - cannot load collector-lib.sh"; exit $UNKNOWN; }
+STATUS=${STATUS:-$STATE_DIR/config-drift.status}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/config-drift-repos-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent-ctr.crunchtools.com}
+REFRESH=${REFRESH:-1800}
+STALE=${STALE:-10800}
 
-raw=$("$EXEC" "$CONTAINER" "$COLLECT" 2>/dev/null)
-rc=$?
-[ "$rc" -eq 0 ] || { echo "CONFIG DRIFT UNKNOWN - collector exec in $CONTAINER exited $rc"; exit $UNKNOWN; }
+cl_open CFGDRIFT "CONFIG DRIFT"
+head=$(grep -m1 '^CFGDRIFT generated=' <<< "$CL_RAW")
+error=$(cl_field error "$head")
+case "$error" in
+    '') ;;
+    conf_unreadable) echo "CONFIG DRIFT UNKNOWN - cannot read source map at ${CONF}"; exit $UNKNOWN ;;
+    *) echo "CONFIG DRIFT UNKNOWN - collector reported: ${error//_/ }"; exit $UNKNOWN ;;
+esac
 
-# Anchored extraction, not a line parse: podman_exec.sh strips the libpod
-# stream framing byte-wise and a stray printable byte can survive it.
-field() { printf '%s\n' "$raw" | grep -m1 -oE "CFGDRIFT $1=.*" | cut -d= -f2- ; }
-fields() { printf '%s\n' "$raw" | grep -oE "CFGDRIFT $1=.*" | cut -d= -f2- ; }
-
-[ -n "$(field end)" ] || { echo "CONFIG DRIFT UNKNOWN - collector output truncated or unrecognised"; exit $UNKNOWN; }
-
-error=$(field error)
-[ -n "$error" ] && { echo "CONFIG DRIFT UNKNOWN - collector reported: $error"; exit $UNKNOWN; }
-
-deployed=$(field deployed)
-unpublished=$(field unpublished)
-unpublished_list=$(field unpublished_list)
+deployed=$(cl_field deployed "$head")
+unpublished=$(cl_field unpublished "$head")
 for v in "$deployed" "$unpublished"; do
   case "$v" in ''|*[!0-9]*) echo "CONFIG DRIFT UNKNOWN - collector returned a non-numeric count"; exit $UNKNOWN ;; esac
 done
+unpublished_list=$(grep -m1 '^CFGDRIFT unpublished_list=' <<< "$CL_RAW" | cut -d= -f2-)
 
-# Deployed path -> content hash, and the set of deployed secret-bearing paths.
-# Each line is validated rather than trusted: one framing byte surviving the
-# strip would otherwise turn into a fabricated mismatch.
-declare -A DISK=()
-declare -A SECRET=()
-corrupt=0
+# A repo whose last good clone is older than STALE is not judged.
+now=$(date +%s)
+unreadable=""
+declare -A FRESH=()
 while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  case "$line" in
-    */config/*:[0-9a-f]*) : ;;
-    *) corrupt=$(( corrupt + 1 )); continue ;;
-  esac
-  sha=${line##*:}
-  path=${line%:*}
-  case "$sha" in *[!0-9a-f]*) corrupt=$(( corrupt + 1 )); continue ;; esac
-  [ "${#sha}" -eq 40 ] || { corrupt=$(( corrupt + 1 )); continue; }
-  DISK["$path"]=$sha
-done < <(fields blob)
-
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  case "$line" in */config/*) SECRET["$line"]=1 ;; *) corrupt=$(( corrupt + 1 )) ;; esac
-done < <(fields secret)
-
-[ "$corrupt" -eq 0 ] || { echo "CONFIG DRIFT UNKNOWN - ${corrupt} unparseable line(s) from the collector"; exit $UNKNOWN; }
-[ "${#DISK[@]}" -gt 0 ] || { echo "CONFIG DRIFT UNKNOWN - collector published no config fingerprints"; exit $UNKNOWN; }
-
-# Which service maps to which rival repo, and which services were never
-# answered for. "none" is a deliberate answer; absence is not.
-declare -A RIVAL=()
-while read -r svc repo _; do
-  case "$svc" in ''|\#*) continue ;; esac
-  [ -n "${repo:-}" ] || continue
-  # The repo field is a comma-separated list, because one service directory can
-  # have more than one rival: everything under /srv/nagios.crunchtools.com/
-  # config/services/ is claimed by the nagios repo AND by this one, which keeps
-  # reference copies of its own Nagios service definitions in deploy/nagios/.
-  #
-  # Each name becomes a path under $WORK and an argument to git clone, so
-  # anything that is not a GitHub repo name is a typo at best.
-  # Validate the RAW field before splitting it. The split below is deliberately
-  # unquoted so the commas become words, which also means pathname expansion --
-  # a bare "*" in this column would otherwise expand to the names in the
-  # working directory, every one of which then looks like a valid repo name and
-  # gets cloned. Reject the field whole, then split what is left.
-  case "$repo" in *[!A-Za-z0-9._,-]*) continue ;; esac
-  bad=0
-  for one in ${repo//,/ }; do
-    case "$one" in ''|.|..) bad=1 ;; esac
-  done
-  [ "$bad" -eq 0 ] || continue
-  RIVAL["$svc"]=$repo
-done < <(grep -vE '^[[:space:]]*(#|$)' "$CONF")
+    repo=$(cl_field repo "$line"); seen=$(cl_field seen "$line")
+    if [ "${seen:-0}" -gt 0 ] && [ $(( now - seen )) -lt "$STALE" ]; then
+        FRESH["$repo"]=1
+    else
+        unreadable="$unreadable $repo"
+    fi
+done < <(grep '^CFGDRIFT repo=' <<< "$CL_RAW")
 
 unmapped=""
-declare -A NEEDED=()
-for path in "${!DISK[@]}" "${!SECRET[@]}"; do
-  svc=${path%%/*}
-  case "${RIVAL[$svc]:-}" in
-    '')     case " $unmapped " in *" $svc "*) : ;; *) unmapped="$unmapped $svc" ;; esac ;;
-    none)   : ;;
-    *)      for one in ${RIVAL[$svc]//,/ }; do NEEDED["$one"]=1; done ;;
-  esac
-done
-
-# Shallow blobless clones, concurrently. Serially this is ~8s per repo against
-# check_nrpe's ceiling; the lesson from check_registry_drift.sh is that a check
-# which times out during a deploy -- precisely when someone is watching -- is
-# worse than no check.
-WORK=$(mktemp -d /tmp/config_drift.XXXXXX) || { echo "CONFIG DRIFT UNKNOWN - cannot create work directory"; exit $UNKNOWN; }
-trap 'rm -rf "$WORK"' EXIT
-
-# Every path the image bakes in, one per line, for the repo just cloned.
-# The clone is blobless, so reading the Containerfile lazily fetches exactly
-# that one blob -- a few KB per repo, and the alternative is guessing.
-# A missing or unreadable Containerfile is not a failure: a repo may not build
-# an image at all, and rootfs/ alone is still a correct answer.
-image_paths() {
-    local repo=$1 out
-    printf 'rootfs/\n'
-    out=$(timeout "$NET_TIMEOUT" git --git-dir="${WORK}/${repo}.git" show HEAD:Containerfile 2>/dev/null) || return 0
-    printf '%s\n' "$out" | awk '
-        toupper($1) != "COPY" && toupper($1) != "ADD" { next }
-        {
-            # Drop the directive, then every flag. --from= copies out of a
-            # build stage rather than out of the repo, so the whole line is
-            # someone elses content and none of our business.
-            from_stage = 0
-            n = 0
-            for (i = 2; i <= NF; i++) {
-                if ($i ~ /^--from=/) { from_stage = 1; break }
-                if ($i ~ /^--/) continue
-                args[++n] = $i
-            }
-            if (from_stage || n < 2) { n = 0; delete args; next }
-            # The last argument is the destination in the image; the rest are
-            # sources in the repo.
-            for (i = 1; i < n; i++) print args[i]
-            n = 0; delete args
-        }'
-    return 0
-}
-
-fetch_tree() {
-    local repo=$1
-    if timeout "$NET_TIMEOUT" git clone -q --filter=blob:none --bare --depth 1 \
-         "${GIT_HOST}/${ORG}/${repo}" "${WORK}/${repo}.git" 2>/dev/null \
-       && git --git-dir="${WORK}/${repo}.git" ls-tree -r HEAD \
-            --format='%(objectname) %(path)' > "${WORK}/${repo}.tree" 2>/dev/null \
-       && [ -s "${WORK}/${repo}.tree" ]; then
-        image_paths "$repo" > "${WORK}/${repo}.image" 2>/dev/null
-        return 0
-    fi
-    rm -f "${WORK}/${repo}.tree" "${WORK}/${repo}.image"
-    return 1
-}
-export -f fetch_tree image_paths
-export GIT_HOST ORG WORK NET_TIMEOUT
-
-if [ "${#NEEDED[@]}" -gt 0 ]; then
-    printf '%s\n' "${!NEEDED[@]}" \
-      | xargs -P "$JOBS" -I{} bash -c 'fetch_tree "$@"' _ {} >/dev/null 2>&1
-fi
-
-unreadable=""
-for repo in "${!NEEDED[@]}"; do
-    [ -s "${WORK}/${repo}.tree" ] || unreadable="$unreadable $repo"
-done
-
-# Longest common trailing path suffix, in components. The deployed
-# config/temporal/config.yaml scores 2 against rootfs/etc/temporal/config.yaml
-# and 1 against .gemini/config.yaml, which is how the right counterpart is
-# found before anything is said about it.
-suffix_score() {
-    local -a a b
-    local n=0 i j
-    IFS=/ read -ra a <<< "$1"
-    IFS=/ read -ra b <<< "$2"
-    i=$(( ${#a[@]} - 1 )); j=$(( ${#b[@]} - 1 ))
-    while [ $i -ge 0 ] && [ $j -ge 0 ] && [ "${a[$i]}" = "${b[$j]}" ]; do
-        n=$(( n + 1 )); i=$(( i - 1 )); j=$(( j - 1 ))
-    done
-    printf '%s' "$n"
-}
+while IFS= read -r line; do
+    unmapped="$unmapped ${line#CFGDRIFT unmapped=}"
+done < <(grep '^CFGDRIFT unmapped=' <<< "$CL_RAW")
 
 divergent=0; duplicate=0; ambiguous=0; secret_exposed=0; critical_files=0
 div_list=""; sec_list=""; amb_list=""
+file_re='(^| )file=(.*)$'
 
-# One pass over every deployed config file. Secret-bearing paths carry no hash
-# by design, so for them the question is presence, not equality.
-for path in "${!DISK[@]}" "${!SECRET[@]}"; do
-    svc=${path%%/*}
-    base=${path##*/}
-    repos=${RIVAL[$svc]:-}
-    [ -n "$repos" ] && [ "$repos" != none ] || continue
+while IFS= read -r line; do
+    repo=$(cl_field repo "$line")
+    [ -n "${FRESH[$repo]:-}" ] || continue
+    [[ $line =~ $file_re ]] || continue
+    file=${BASH_REMATCH[2]}
+    base=$(cl_field base "$line")
+    case "$(cl_field kind "$line")" in
+        AMBIGUOUS) ambiguous=$(( ambiguous + 1 )); amb_list="$amb_list $file" ;;
+        SECRET)    secret_exposed=$(( secret_exposed + 1 )); sec_list="$sec_list $file" ;;
+        DUPLICATE) duplicate=$(( duplicate + 1 )) ;;
+        DIVERGENT)
+            divergent=$(( divergent + 1 )); div_list="$div_list $file"
+            # Deployed content that origin/master does not hold, in a file a
+            # rival repo also claims. That is not a latent hazard, it is the
+            # state lotor was in on 2026-09-20.
+            case ",$unpublished_list," in *",$base,"*) critical_files=$(( critical_files + 1 )) ;; esac ;;
+    esac
+done < <(grep '^CFGDRIFT item ' <<< "$CL_RAW")
 
-    # A build file is not configuration; /srv keeps local Containerfiles for a
-    # couple of services and comparing those to the repo's would flag forever.
-    case "$base" in Containerfile|Dockerfile|.containerignore) continue ;; esac
-
-    # Scored across every rival at once, not per rival, so the winner is the
-    # single best counterpart in the org rather than one per repo -- otherwise
-    # a file claimed by two repos would be reported twice.
-    best=0; best_path=""; best_sha=""; best_repo=""; ties=0
-    for repo in ${repos//,/ }; do
-        [ -s "${WORK}/${repo}.tree" ] || continue
-        while read -r rsha rpath; do
-            [ "${rpath##*/}" = "$base" ] || continue
-            # Documentation, fixtures and examples. See the header.
-            case "$rpath" in docs/*|tests/*|examples/*) continue ;; esac
-            score=$(suffix_score "$path" "$rpath")
-            if [ "$score" -gt "$best" ]; then
-                best=$score; best_path=$rpath; best_sha=$rsha; best_repo=$repo; ties=1
-            elif [ "$score" -eq "$best" ] && [ "$best" -gt 0 ]; then
-                ties=$(( ties + 1 ))
-            fi
-        done < "${WORK}/${repo}.tree"
-    done
-
-    [ "$best" -gt 0 ] || continue
-    repo=$best_repo
-
-    if [ "$ties" -gt 1 ]; then
-        ambiguous=$(( ambiguous + 1 ))
-        amb_list="$amb_list ${repo}/${base}"
-        continue
-    fi
-
-    # Image content, not a second home for deployed config. See the header.
-    # Matched as a prefix so a COPY of a directory covers everything under it,
-    # and exactly so a COPY of a single file covers just that file.
-    baked=0
-    while IFS= read -r ip; do
-        [ -n "$ip" ] || continue
-        case "$ip" in
-            */) case "$best_path" in "$ip"*) baked=1; break ;; esac ;;
-            *)  case "$best_path" in "$ip"|"$ip"/*) baked=1; break ;; esac ;;
-        esac
-    done < "${WORK}/${repo}.image"
-    [ "$baked" -eq 0 ] || continue
-
-    if [ -n "${SECRET[$path]:-}" ]; then
-        secret_exposed=$(( secret_exposed + 1 ))
-        sec_list="$sec_list ${repo}/${best_path}"
-        continue
-    fi
-
-    if [ "$best_sha" = "${DISK[$path]}" ]; then
-        duplicate=$(( duplicate + 1 ))
-    else
-        divergent=$(( divergent + 1 ))
-        div_list="$div_list ${repo}/${best_path}"
-        # Deployed content that origin/master does not hold, in a file a rival
-        # repo also claims. That is not a latent hazard, it is the state lotor
-        # was in on 2026-09-20.
-        case ",$unpublished_list," in *",$base,"*) critical_files=$(( critical_files + 1 )) ;; esac
-    fi
-done
-
-# Workers and hash buckets both hand results back in whatever order they
-# please, and without this the names shuffle between runs of an otherwise
-# unchanged check.
-sort_words() { printf '%s\n' $1 | sort | paste -sd' ' - | sed 's/^/ /'; }
-[ -n "$div_list" ] && div_list=$(sort_words "$div_list")
-[ -n "$sec_list" ] && sec_list=$(sort_words "$sec_list")
-[ -n "$amb_list" ] && amb_list=$(sort_words "$amb_list")
-[ -n "$unreadable" ] && unreadable=$(sort_words "$unreadable")
-[ -n "$unmapped" ] && unmapped=$(sort_words "$unmapped")
+# The collector sorts its lines; strip the leading space the lists build with.
+[ -n "$div_list" ] && div_list=" ${div_list# }"
+[ -n "$sec_list" ] && sec_list=" ${sec_list# }"
+[ -n "$amb_list" ] && amb_list=" ${amb_list# }"
 
 n_unreadable=$(printf '%s' "$unreadable" | wc -w)
 n_unmapped=$(printf '%s' "$unmapped" | wc -w)
@@ -401,6 +206,7 @@ perf="$perf ambiguous=${ambiguous};;;0"
 perf="$perf unmapped=${n_unmapped};;;0"
 perf="$perf unchecked=${n_unreadable};;;0"
 perf="$perf deployed=${deployed};;;0"
+perf="$perf collected_age=${CL_AGE}s;;${STALE}"
 
 detail=""
 [ -n "$div_list" ] && detail="${detail}divergent:${div_list}. "
@@ -409,6 +215,7 @@ detail=""
 [ -n "$unreadable" ] && detail="${detail}unreadable:${unreadable}. "
 [ -n "$unmapped" ] && detail="${detail}unmapped:${unmapped}. "
 [ -n "$unpublished_list" ] && detail="${detail}unpublished:${unpublished_list}. "
+[ -n "$CL_KICKED" ] && detail="${detail}${CL_KICKED# }. "
 
 drift=$(( divergent + secret_exposed ))
 

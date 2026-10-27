@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.2.0] - 2026-10-26
+
+### Changed
+
+- Deploy drift and Config drift cross-repo, the last two checks that made
+  outside calls on every run, now use the collector and status-file pattern
+  (constitution XVI). `deploy-drift-collect.sh` lists and inspects the running
+  containers and asks Quay where each tag points; `config-drift-repos-collect.sh`
+  takes the fingerprint from `nagios-agent.crunchtools.com` and clones the
+  rival repos, caching each repo's tree so a failed clone keeps the last good
+  one. Both run in `nagios-agent-ctr.crunchtools.com`, kicked at 30m and stale
+  at 3h against the 60m check_interval. The checks keep their arguments,
+  thresholds and first lines: deploy drift applies `grace_hours` when it
+  judges, config drift keeps the divergence ratchet and the CRITICAL ladder.
+  Perfdata gains `collected_age`.
+
 ## [7.1.1] - 2026-10-26
 
 ### Fixed
