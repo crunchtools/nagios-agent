@@ -28,9 +28,9 @@
 # (2h), or markers pCloud last answered with more than STALE ago (the
 # collector keeps the previous markers through a timeout).
 
-STATE_DIR=${STATE_DIR:-/var/lib/nagios-agent}
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "PERSONAL BACKUPS UNKNOWN - cannot load collector-lib.sh"; exit 3; }
 STATUS=${STATUS:-$STATE_DIR/personal-backup-freshness.status}
-EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 COLLECT=${COLLECT:-/usr/local/nagios/libexec/backup-freshness-collect.sh}
 CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 REFRESH=${REFRESH:-1200}
@@ -42,34 +42,19 @@ NOW=$(date +%s)
 W_WARN=9  W_CRIT=16    # days — Weekly-1 runs Fridays 06:00
 M_WARN=70 M_CRIT=100   # days — each monthly rotation fires every other month
 
-kick() { "$EXEC" --detach "$CONTAINER" "$COLLECT" personal >/dev/null 2>&1; }
-hm() { echo "$(( $1 / 3600 ))h$(( $1 % 3600 / 60 ))m"; }
-
-if [ ! -r "$STATUS" ]; then
-    kick && started="collector started" || started="collector could not be started"
-    echo "PERSONAL BACKUPS UNKNOWN - collector stale: no status file at $STATUS ($started)"
-    exit 3
-fi
-raw=$(cat "$STATUS")
+cl_open PBKUP "PERSONAL BACKUPS" personal   # exits UNKNOWN "collector stale" when it must
+raw=$CL_RAW collected=$CL_AGE kicked=$CL_KICKED
 head_line=$(grep -m1 -E '^PBKUP generated=[0-9]+ seen=[0-9]+ rc=[0-9]+' <<< "$raw")
-if [ -z "$head_line" ] || ! grep -qx 'PBKUP end=1' <<< "$raw"; then
-    kick
+if [ -z "$head_line" ]; then
+    cl_kick personal
     echo "PERSONAL BACKUPS UNKNOWN - collector stale: $STATUS is truncated or unrecognised"
     exit 3
 fi
-generated=$(grep -oE 'generated=[0-9]+' <<< "$head_line" | cut -d= -f2)
-seen=$(grep -oE 'seen=[0-9]+' <<< "$head_line" | cut -d= -f2)
-rc=$(grep -oE ' rc=[0-9]+' <<< "$head_line" | cut -d= -f2)
-lastfail=$(grep -oE 'lastfail=[a-z]+' <<< "$head_line" | cut -d= -f2)
-collected=$((NOW - generated))
-kicked=""
-if [ "$collected" -ge "$REFRESH" ]; then kick || kicked=" (collector could not be started)"; fi
-if [ "$collected" -ge "$STALE" ]; then
-    echo "PERSONAL BACKUPS UNKNOWN - collector stale: last collection $(hm "$collected") ago${kicked}"
-    exit 3
-fi
+seen=$(cl_field seen "$head_line")
+rc=$(cl_field rc "$head_line")
+lastfail=$(cl_field lastfail "$head_line")
 if [ $((NOW - seen)) -ge "$STALE" ]; then
-    echo "PERSONAL BACKUPS UNKNOWN - collector stale: pCloud last answered $(hm $((NOW - seen))) ago${lastfail:+ (last attempt: $lastfail)}"
+    echo "PERSONAL BACKUPS UNKNOWN - collector stale: pCloud last answered $(cl_hm $((NOW - seen))) ago${lastfail:+ (last attempt: $lastfail)}"
     exit 3
 fi
 if [ "$rc" -eq 124 ]; then

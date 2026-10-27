@@ -47,183 +47,54 @@
 # named in the output. A check that reports OK when it did not run is worse
 # than no check, because it occupies the slot where a working one would go.
 
+# COLLECTOR (7.1.0). Every read above now happens in registry-drift-collect.sh,
+# which writes registry-drift.status; this plugin only judges that file, so a
+# slow registry can no longer time the check out. When the file is missing or
+# older than REFRESH (30m, under the 60m check_interval) the collector is
+# started detached through `podman_exec.sh --detach` in
+# nagios-agent-ctr.crunchtools.com and the previous run's file is judged. An
+# image the collector last read more than STALE (3h) ago counts as unreadable,
+# and the whole check is UNKNOWN "collector stale" when the file is missing or
+# older than STALE. The grace is measured here, at judging time, from the
+# release date the collector recorded, so it stays stateless.
+
 set -uo pipefail
 
 CONF=${REGISTRY_DRIFT_CONF:-/etc/nagios/registry-images.conf}
-QUAY_API=${QUAY_API:-https://quay.io/api/v1}
-GHCR=${GHCR:-https://ghcr.io}
-ORG=${REGISTRY_DRIFT_ORG:-crunchtools}
-GIT_HOST=${REGISTRY_DRIFT_GIT_HOST:-https://github.com}
-NET_TIMEOUT=${REGISTRY_DRIFT_TIMEOUT:-15}
 WARN=${REGISTRY_DRIFT_WARN:-14400}
-SOCK=${REGISTRY_DRIFT_SOCK:-/run/podman/podman.sock}
-
-# Bare `git ls-remote` against anything it cannot read BLOCKS on a credential
-# prompt rather than failing. Unset, this plugin hangs until NRPE gives up and
-# the service goes UNKNOWN with no detail. Belt and braces: refuse the prompt,
-# and bound every call with timeout regardless.
-export GIT_TERMINAL_PROMPT=0
-export GIT_ASKPASS=/bin/true
 
 OK=0; WARNING=1; CRITICAL=2; UNKNOWN=3
 
-[ -r "$CONF" ] || {
+# shellcheck source=collector-lib.sh
+. "$(dirname "$0")/collector-lib.sh" || { echo "REGISTRY DRIFT UNKNOWN - cannot load collector-lib.sh"; exit $UNKNOWN; }
+STATUS=${STATUS:-$STATE_DIR/registry-drift.status}
+COLLECT=${COLLECT:-/usr/local/nagios/libexec/registry-drift-collect.sh}
+CONTAINER=${CONTAINER:-nagios-agent-ctr.crunchtools.com}
+REFRESH=${REFRESH:-1800}
+STALE=${STALE:-10800}
+
+cl_open RDRIFT "REGISTRY DRIFT"
+if grep -q '^RDRIFT generated=[0-9]* error=conf_unreadable' <<< "$CL_RAW"; then
     echo "REGISTRY DRIFT UNKNOWN - cannot read image list at ${CONF}"
     exit $UNKNOWN
-}
-
-# Newest semver tag for a repo. Prints nothing on success-with-no-tags, and
-# returns non-zero only when the remote could not be read -- the caller needs
-# to tell "no tags" (a finding) from "could not look" (unknown).
-newest_tag() {
-    local repo=$1 out
-    out=$(timeout "$NET_TIMEOUT" git ls-remote --tags --refs "${GIT_HOST}/${ORG}/${repo}" 2>/dev/null) || return 1
-    # --refs drops the ^{} peeled entries; sort -V orders semver properly.
-    printf '%s\n' "$out" \
-        | awk '{print $2}' \
-        | sed 's#refs/tags/##' \
-        | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-        | sed 's/^v//' \
-        | sort -V \
-        | tail -1
-    return 0
-}
-
-# Quay and GHCR are inconsistent about the v prefix: a git tag of v0.7.0 is
-# published as 0.7.0 on Quay, and some images carry both. Accept either.
-tag_present() {
-    local tags=$1 want=$2
-    printf '%s\n' "$tags" | grep -qxF "$want" && return 0
-    printf '%s\n' "$tags" | grep -qxF "v$want"
-}
-
-quay_body() {
-    curl -sf --max-time "$NET_TIMEOUT" \
-        "${QUAY_API}/repository/${ORG}/$1/tag/?onlyActiveTags=true&limit=100"
-}
-
-quay_names() { printf '%s' "$1" | grep -oP '"name":\s*"\K[^"]+'; }
-
-# start_ts of tag <want> (or v<want>) in a Quay tag listing. Tag objects can
-# nest (child_manifests_presence), so split the listing at each tag's "name"
-# key rather than at braces: each piece is then one tag's fields.
-quay_start() {
-    printf '%s' "$1" | sed 's/{"name"/\n{"name"/g' \
-        | grep -E "^\{\"name\":\s*\"v?${2//./\\.}\"" \
-        | grep -oP '"start_ts":\s*\K[0-9]+' | head -1
-}
-
-# Created epoch of a local image tagged <img>:<tag> on either registry, from
-# the image list fetched once into $LOCAL_IMAGES. sqlite3 reads the JSON (the
-# image has no jq); <img> is checked against a strict pattern before it is
-# spliced into the query, and <tag> is semver digits by construction.
-local_created() {
-    local img=$1 tag=$2 refs="" r
-    [ -s "${LOCAL_IMAGES:-}" ] || return 0
-    command -v sqlite3 >/dev/null || return 0
-    [[ $img =~ ^[a-z0-9._-]+$ && $tag =~ ^[0-9.]+$ ]] || return 0
-    for r in "quay.io/${ORG}/${img}" "ghcr.io/${ORG}/${img}"; do
-        refs="${refs:+$refs,}'$r:$tag','$r:v$tag'"
-    done
-    sqlite3 :memory: "SELECT coalesce(max(json_extract(i.value,'\$.Created')),'')
-        FROM json_each(CAST(readfile('$LOCAL_IMAGES') AS TEXT)) i,
-             json_each(i.value,'\$.RepoTags') t
-        WHERE t.value IN ($refs)" 2>/dev/null | grep -E '^[0-9]+$'
-}
-
-ghcr_tags() {
-    local img=$1 token body
-    # Anonymous pull token. Every image checked here is public; the one private
-    # package in the org belongs to the repo this plugin deliberately skips.
-    token=$(curl -sf --max-time "$NET_TIMEOUT" \
-        "${GHCR}/token?scope=repository:${ORG}/${img}:pull&service=ghcr.io" \
-        | grep -oP '"token":\s*"\K[^"]+') || return 1
-    [ -n "$token" ] || return 1
-    # ghcr pages tags/list at 100 by default; ask for everything in one page.
-    body=$(curl -sf --max-time "$NET_TIMEOUT" -H "Authorization: Bearer ${token}" \
-        "${GHCR}/v2/${ORG}/${img}/tags/list?n=10000") || return 1
-    printf '%s' "$body" | grep -oP '"tags":\s*\[\K[^]]*' | tr ',' '\n' | tr -d ' "'
-    return 0
-}
-
-# One image in, one verdict line out. Everything network-bound lives in here so
-# the images can be checked concurrently; the verdicts are tallied afterwards by
-# a single reader, which keeps the counting logic sequential and easy to follow.
-check_one() {
-    local repo=$1 img=$2 flag=${3:-} tag gaps qb qt gt since
-
-    # A fork's git tags are upstream's releases, not versions of the image we
-    # publish, so there is nothing here to compare. Quay staleness covers them.
-    if [ "$flag" = "fork" ]; then
-        printf 'SKIPPED\n'
-        return
-    fi
-
-    if ! tag=$(newest_tag "$repo"); then
-        printf 'UNKNOWN %s(git)\n' "$img"
-        return
-    fi
-
-    if [ -z "$tag" ]; then
-        printf 'UNTAGGED %s\n' "$repo"
-        return
-    fi
-
-    gaps=""
-
-    if qb=$(quay_body "$img"); then
-        qt=$(quay_names "$qb")
-        tag_present "$qt" "$tag" || gaps="quay"
-    else
-        printf 'UNKNOWN %s(quay)\n' "$img"
-        return
-    fi
-
-    if gt=$(ghcr_tags "$img"); then
-        tag_present "$gt" "$tag" || gaps="${gaps:+$gaps+}ghcr"
-    else
-        printf 'UNKNOWN %s(ghcr)\n' "$img"
-        return
-    fi
-
-    if [ -n "$gaps" ]; then
-        since=""
-        [ "$gaps" = ghcr ] && since=$(quay_start "$qb" "$tag")
-        [ -n "$since" ] || since=$(local_created "$img" "$tag")
-        printf 'MISSING %s:%s[%s] %s\n' "$img" "$tag" "$gaps" "${since:-0}"
-    else
-        printf 'CLEAN\n'
-    fi
-}
-export -f check_one newest_tag quay_body quay_names quay_start local_created ghcr_tags tag_present
-
-# One read of the local image list for local_created(). Failure just means no
-# local dates, so every missing image without a Quay date counts as aged.
-LOCAL_IMAGES=$(mktemp) || LOCAL_IMAGES=""
-trap '[ -n "$LOCAL_IMAGES" ] && rm -f "$LOCAL_IMAGES"' EXIT
-if [ -n "$LOCAL_IMAGES" ] && [ -S "$SOCK" ]; then
-    curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
-        "http://localhost/v5.0.0/libpod/images/json" > "$LOCAL_IMAGES" 2>/dev/null || : > "$LOCAL_IMAGES"
 fi
-export QUAY_API GHCR ORG GIT_HOST NET_TIMEOUT LOCAL_IMAGES
 
-# Run the images concurrently. Serially this made ~170 network calls back to
-# back and took ~39s against check_nrpe's 45s ceiling -- 86% of the budget, so
-# any registry latency tipped it to CRITICAL "Socket timeout". It did exactly
-# that three times during one deploy on 2026-09-20, while the underlying answer
-# was a clean 56/56. A monitoring check that cries wolf during deploys, which is
-# precisely when someone is watching, trains everyone to ignore it.
-#
-# Each worker prints one short line and only at the end, and writes under
-# PIPE_BUF are atomic on a pipe, so the verdicts cannot interleave.
-#
-# Sorted on the way out: workers finish in whatever order the network allows,
-# and without this the names in the detail list shuffle between runs of an
-# otherwise unchanged check.
-JOBS=${REGISTRY_DRIFT_JOBS:-8}
-results=$(grep -vE '^[[:space:]]*(#|$)' "$CONF" \
-    | xargs -P "$JOBS" -L1 bash -c 'check_one "$@"' _ \
-    | sort)
+# One "kind value since" line per image, as the collector's workers wrote it.
+# An answer older than STALE is not judged: it counts as unreadable.
+results=$(
+    while IFS= read -r line; do
+        img=$(cl_field item "$line"); seen=$(cl_field seen "$line")
+        if [ $(( $(date +%s) - ${seen:-0} )) -ge "$STALE" ]; then
+            echo "UNKNOWN ${img}(stale)"
+        else
+            echo "$(cl_field kind "$line") $(cl_field value "$line") $(cl_field since "$line")"
+        fi
+    done < <(grep '^RDRIFT item=' <<< "$CL_RAW") | sort
+)
+if [ -z "$results" ]; then
+    echo "REGISTRY DRIFT UNKNOWN - collector stale: $STATUS holds no images"
+    exit $UNKNOWN
+fi
 
 untagged=""; missing=""; unknown=""; clean=0; total=0; skipped=0
 seen_untagged=""; grace=""; now=$(date +%s); oldest_age=-1
@@ -264,17 +135,18 @@ n_unknown=$(printf '%s' "$unknown" | wc -w)
 n_grace=$(printf '%s' "$grace" | wc -w)
 drift=$((n_untagged + n_missing))
 
-perf="untagged=${n_untagged};;;0 missing=${n_missing};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 skipped=${skipped};;;0 in_grace=${n_grace};;;0"
+perf="untagged=${n_untagged};;;0 missing=${n_missing};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 skipped=${skipped};;;0 in_grace=${n_grace};;;0 collected_age=${CL_AGE}s;;${STALE}"
 
 detail=""
 [ -n "$untagged" ] && detail="${detail}untagged:${untagged}. "
 [ -n "$missing" ] && detail="${detail}missing:${missing}. "
 [ -n "$unknown" ] && detail="${detail}unreadable:${unknown}. "
 [ -n "$grace" ] && detail="${detail}in grace:${grace}. "
+[ -n "$CL_KICKED" ] && detail="${detail}${CL_KICKED# }. "
 
 # How unreadable images are handled, since the honest answer is not simply
-# "always UNKNOWN". This makes ~56 network calls per run against three external
-# services, so the occasional transient failure is certain. Flipping the whole
+# "always UNKNOWN". The collector makes ~170 network calls per run against three
+# external services, so the occasional transient failure is certain. Flipping the whole
 # check to UNKNOWN on one flaky call would bury real drift behind noise and
 # train everyone to ignore it -- the same way a check that never runs occupies
 # the slot a working one would fill.

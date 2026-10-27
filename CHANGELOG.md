@@ -6,6 +6,54 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-10-26
+
+### Added
+
+- Collectors for every check that called an outside API on each run
+  (constitution XVI). Each one does its reads with per-item timeouts inside a
+  budget, keeps an item's last good answer when a read fails, and writes a
+  status file atomically to `/var/lib/nagios-agent`. The checks judge the file
+  with their old thresholds, arguments and first-line format, start the
+  collector detached in `nagios-agent-ctr.crunchtools.com` when the file is
+  past REFRESH, and go UNKNOWN "collector stale" only when it is missing or
+  past STALE. Perfdata gains `collected_age`.
+  - `cloudflare-collect.sh`: all zones in `cloudflare-zones.conf` plus the
+    status page, one pass. `check_cloudflare_status.sh`,
+    `check_cloudflare_global.sh`. REFRESH 2m, STALE 10m.
+  - `quay-collect.sh`: every `check_quay_staleness.sh` image in the NRPE
+    config, plus any image a check names when it kicks.
+    `check_quay_staleness.sh`. REFRESH 2m, STALE 10m.
+  - `registry-drift-collect.sh`: the git, Quay and GHCR reads moved out of
+    `check_registry_drift.sh` unchanged, with a 120s budget. The 4h drift
+    grace is measured when the file is judged. REFRESH 30m, STALE 3h.
+  - `google-oauth-collect.sh`: the refresh-token exchange for every account in
+    `google-accounts.conf`. A token Google rejected stays CRITICAL while
+    nothing can be read. `check_google_oauth.sh`. REFRESH 2m, STALE 10m.
+- `collector-lib.sh`: lock, atomic publish, status load, age gate and
+  detached kick, shared by all five collectors and their checks. The backup
+  collector and checks from 7.0.0 now use it too, with unchanged output.
+- The ctr agent unit bind-mounts `/srv/nagios-agent.crunchtools.com/data` at
+  `/var/lib/nagios-agent`, the same directory the host agent uses.
+
+### Fixed
+
+- `check_cloudflare_status.sh` had been blind since Cloudflare sunset the
+  Zone Analytics REST API: every call returned error 1015 and the plugin read
+  it as zero traffic, so every zone reported "OK - no traffic in last 24h".
+  The collector reads the GraphQL Analytics API instead, and an API error is
+  UNKNOWN, not OK.
+- The Cloudflare token is passed to curl in a 0600 config file, never in its
+  argv, which `--pid=host` makes readable from anywhere on the host.
+- `registry-images.conf` listed mcp-workboard twice, so Registry drift
+  counted 56 images where there are 55. The collector also drops duplicate
+  lines.
+
+### Unchanged
+
+- `check_postiz_tokens.sh` (OAuth token expiry) stays live: it reads Postiz's
+  own database through the podman socket and makes no outside call.
+
 ## [7.0.0] - 2026-10-26
 
 ### Changed

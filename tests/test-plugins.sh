@@ -1,6 +1,7 @@
 #!/bin/bash
 # Offline tests for the exec-free container plugins (RT #1513), the
-# Cloudflare component filter and the personal backup markers. curl, rclone and
+# collector + status-file checks (backups, Cloudflare, Quay, registry drift,
+# Google OAuth) and the Cloudflare component filter. curl, rclone and
 # podman_exec.sh are stubbed, so this runs anywhere with bash and GNU grep -P,
 # no Podman socket needed.
 set -uo pipefail
@@ -46,6 +47,11 @@ expect() {
     fi
 }
 
+ok_if() { # <desc> <command...>: PASS when the command succeeds
+    local d=$1; shift
+    if "$@"; then echo "  PASS: $d"; PASS=$((PASS + 1)); else echo "  FAIL: $d"; FAIL=$((FAIL + 1)); fi
+}
+
 PC="$LIBEXEC/check_container_process_count.sh"
 HTTP="$LIBEXEC/check_container_httpd_internal.sh"
 
@@ -79,37 +85,6 @@ expect "port with @ rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr '80@1
 expect "port out of range rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr 70000 /
 expect "path without leading / rejected" 3 "UNKNOWN - invalid path" no -- "$HTTP" ctr 80 '@evil/'
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" no -- "$HTTP" '../../containers/json#' 80 /
-
-echo "=== check_cloudflare_global ==="
-CF="$LIBEXEC/check_cloudflare_global.sh"
-cf_incident() {  # <name> <impact> <component>...
-    local name="$1" impact="$2" comps="" c; shift 2
-    for c in "$@"; do comps="${comps:+$comps,}{\"id\":\"x\",\"name\":\"$c\",\"status\":\"degraded_performance\"}"; done
-    printf '{"id":"i","name":"%s","status":"investigating","impact":"%s","components":[%s]}' "$name" "$impact" "$comps"
-}
-if ! command -v gawk >/dev/null; then
-    echo "  FAIL: gawk is required (check_cloudflare_global parses JSON with it)"
-    FAIL=$((FAIL + 1))
-else
-    APAC=$(cf_incident "Network Performance Degradation - Asia-Pacific" minor "Network")
-    WARP=$(cf_incident "Incorrect geo location for some WARP users" minor "WARP")
-    CDN=$(cf_incident "Elevated cache errors" minor "CDN/Cache" "Network")
-    DNS=$(cf_incident "Authoritative DNS failures" major "Authoritative DNS")
-    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$APAC,$WARP]}" \
-        expect "regional Network and WARP stay OK" 0 "^OK .*2 unrelated" no -- "$CF"
-    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$WARP,$CDN]}" \
-        expect "minor CDN/Cache is WARNING" 1 "^WARNING .*Elevated cache errors.*CDN/Cache" no -- "$CF"
-    STUB_DIRECT="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$DNS]}" \
-        expect "major Authoritative DNS is CRITICAL" 2 "^CRITICAL .*Authoritative DNS failures" no -- "$CF"
-    STUB_DIRECT='' expect "no response is UNKNOWN" 3 "^UNKNOWN" no -- "$CF"
-    # Every listed component must raise an alert on its own. Names were checked
-    # against cloudflarestatus.com/api/v2/components.json when the list was set.
-    while IFS= read -r COMP; do
-        [ -n "$COMP" ] || continue
-        STUB_DIRECT="{\"incidents\":[$(cf_incident "Test incident" minor "$COMP")]}" \
-            expect "listed component alerts: $COMP" 1 "^WARNING .*$COMP" no -- "$CF"
-    done < <(sed -n '/^RELEVANT_COMPONENTS="/,/^"/p' "$CF" | sed '1d;$d')
-fi
 
 echo "=== podman_exec (exec stream decoding) ==="
 # A second curl stub that plays the three Podman API calls: create returns an
@@ -668,6 +643,8 @@ RD="$LIBEXEC/check_registry_drift.sh"
 GSTUBS="$(mktemp -d)"
 cat > "$GSTUBS/git" <<'STUB'
 #!/bin/bash
+[ -n "${STUB_GIT_SLOW:-}" ] && exec sleep 30
+[ -n "${STUB_GIT_SLOW_REPO:-}" ] && [[ "${!#}" == */"$STUB_GIT_SLOW_REPO" ]] && exec sleep 30
 [ -n "${STUB_TAG:-}" ] && printf 'deadbeef\trefs/tags/v%s\n' "$STUB_TAG"
 exit 0
 STUB
@@ -676,7 +653,7 @@ cat > "$GSTUBS/curl" <<'STUB'
 for a in "$@"; do
     case "$a" in
         --unix-socket) printf '%s' "${STUB_LOCAL:-[]}"; exit 0 ;;
-        */tag/*) printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
+        */tag/*) [ -n "${STUB_QUAY_FAIL:-}" ] && exit 22; printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
         */token*) printf '{"token":"t"}'; exit 0 ;;
         */tags/list*) printf '%s' "${STUB_GHCR:-}"; exit 0 ;;
     esac
@@ -686,7 +663,18 @@ STUB
 chmod +x "$GSTUBS/git" "$GSTUBS/curl"
 echo "svc svc" > "$GSTUBS/images.conf"
 python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$GSTUBS/sock"
-rd() { PATH="$GSTUBS:$PATH" REGISTRY_DRIFT_CONF="$GSTUBS/images.conf" REGISTRY_DRIFT_SOCK="$GSTUBS/sock" "$RD"; }
+RDC="$LIBEXEC/registry-drift-collect.sh"
+RDSTATE="$(mktemp -d)"
+RDSTAT="$RDSTATE/registry-drift.status"
+cat > "$GSTUBS/kick" <<'STUB'
+#!/bin/bash
+echo "$*" > "$STUB_EXEC_MARK"
+STUB
+chmod +x "$GSTUBS/kick"
+# rdcol: one collector run; rdchk: judge its file; rd: both, from scratch
+rdcol() { PATH="$GSTUBS:$PATH" STATE_DIR="$RDSTATE" REGISTRY_DRIFT_CONF="$GSTUBS/images.conf" REGISTRY_DRIFT_SOCK="$GSTUBS/sock" "$RDC"; }
+rdchk() { STATE_DIR="$RDSTATE" EXEC="$GSTUBS/kick" COLLECT=/collector "$RD"; }
+rd() { rm -f "$RDSTAT"; rdcol; rdchk; }
 quayj() { # <start_ts> [name]: a tag listing shaped like Quay's, nested object included
     printf '{"tags": [{"name": "%s", "reversion": false, "start_ts": %s, "child_manifests_presence": {"sha256:aa": true}}, {"name": "latest", "start_ts": 1}]}' "${2:-1.2.0}" "$1"
 }
@@ -709,7 +697,269 @@ if command -v sqlite3 >/dev/null; then
 fi
 STUB_TAG="" STUB_QUAY="$(quayj 1)" STUB_GHCR="$GH_HAS" \
     expect "untagged repo always warns" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 1 untagged" any -- rd
-rm -rf "$GSTUBS"
+echo "=== registry-drift-collect (status file, kick) ==="
+printf 'svc svc\nsvc svc\n' > "$GSTUBS/images.conf"
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" \
+    expect "a doubled conf line is counted once" 0 "^REGISTRY DRIFT OK - 1/1 images carry .* collected_age=" no -- rd
+echo "svc svc" > "$GSTUBS/images.conf"
+# The grace is measured when the file is judged, not when it was written.
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" rdcol
+expect "drift inside the grace is OK" 0 "^REGISTRY DRIFT OK - drift 1h, within grace" no -- rdchk
+sed -i -E "s/since=[0-9]+/since=$((T - 18000))/" "$RDSTAT"
+expect "the same drift past the grace is WARNING with no new read" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" no -- rdchk
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 18000)))" STUB_GHCR="$GH_NOT" rdcol
+STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 STUB_GHCR="$GH_NOT" rdcol
+expect "an unreadable registry keeps the last answer" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" no -- rdchk
+sed -i -E "/item=svc /s/seen=[0-9]+/seen=$((T - 11000))/" "$RDSTAT"
+expect "an answer older than STALE counts as unreadable" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(stale\\)" no -- rdchk
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 STUB_GHCR="$GH_NOT" rdcol
+expect "first-ever unreadable registry is UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(quay\\)" no -- rdchk
+T0=$SECONDS
+rm -f "$RDSTAT"; STUB_GIT_SLOW=1 BUDGET=1 REGISTRY_DRIFT_TIMEOUT=2 rdcol
+ok_if "a hung git call stays inside the budget" [ $((SECONDS - T0)) -le 4 ]
+expect "an image the budget cut off is UNKNOWN by name" 3 "unreadable: svc\\(budget\\)" no -- rdchk
+# Answers are matched to images by name: a finished image keeps its answer
+# beside one the budget cut off, and a name the conf rule rejects is dropped.
+printf 'svc svc\nslow slow\nbad bad/x\n' > "$GSTUBS/images.conf"
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" STUB_GIT_SLOW_REPO=slow BUDGET=2 REGISTRY_DRIFT_TIMEOUT=3 rdcol
+expect "answers are matched by image, missing ones UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - 1/2 images could not be checked. unreadable: slow\\(budget\\)" no -- rdchk
+ok_if "finished image keeps its own answer" grep -q '^RDRIFT item=svc seen=[0-9]* kind=CLEAN$' "$RDSTAT"
+ok_if "an image name the conf rule rejects is not recorded" bash -c '! grep -q "item=bad" "$0"' "$RDSTAT"
+echo "svc svc" > "$GSTUBS/images.conf"
+rm -f "$RDSTAT"
+PATH="$GSTUBS:$PATH" STATE_DIR="$RDSTATE" REGISTRY_DRIFT_CONF=/nonexistent "$RDC"
+expect "unreadable image list is UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - cannot read image list" no -- rdchk
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" rdcol
+sed -i -E "s/generated=[0-9]+/generated=$((T - 2000))/" "$RDSTAT"
+expect "status past REFRESH is still judged and starts the collector" 0 "^REGISTRY DRIFT OK" yes -- rdchk
+sed -i -E "s/generated=[0-9]+/generated=$((T - 11000))/" "$RDSTAT"
+expect "status past STALE is UNKNOWN collector stale" 3 "^REGISTRY DRIFT UNKNOWN - collector stale: last collection 3h" yes -- rdchk
+rm -f "$RDSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^REGISTRY DRIFT UNKNOWN - collector stale: no status file .*collector started" yes -- rdchk
+grep -q -- '--detach nagios-agent-ctr.crunchtools.com /collector' "$STUB_EXEC_MARK" \
+    && { echo "  PASS: kick is a detached exec in the ctr agent"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+rm -rf "$GSTUBS" "$RDSTATE"
+
+echo "=== remote collectors (7.1.0): shared stubs ==="
+# Cloudflare, Quay, registry drift and Google OAuth checks judge status files
+# their collectors write. The collectors are driven here directly with a curl
+# stub routed by URL; the checks' detached kick goes through a stub that
+# records its arguments in $STUB_EXEC_MARK.
+RSTATE="$(mktemp -d)"
+RSTUBS="$(mktemp -d)"
+cat > "$RSTUBS/curl" <<'STUB'
+#!/bin/bash
+url="" mt=30 prev=""
+for a in "$@"; do
+    case "$a" in http://*|https://*) url="$a" ;; esac
+    [ "$prev" = --max-time ] && mt=$a
+    prev=$a
+done
+[ -n "${STUB_CURL_LOG:-}" ] && echo "$*" >> "$STUB_CURL_LOG"
+inc=${STUB_INC-'{"incidents":[]}'}
+case "$url" in
+    */graphql)
+        # Like curl, give up at --max-time with exit 28.
+        [ -n "${STUB_GQL_SLOW:-}" ] && { sleep "$mt"; echo "curl: (28) Operation timed out" >&2; exit 28; }
+        [ "${STUB_GQL_RC:-0}" -ne 0 ] && { echo "curl: (7) Failed to connect" >&2; exit "$STUB_GQL_RC"; }
+        printf '%s' "${STUB_GQL:-}" ;;
+    */incidents/unresolved.json)
+        [ "${STUB_INC_RC:-0}" -ne 0 ] && { echo "curl: (6) Could not resolve host" >&2; exit "$STUB_INC_RC"; }
+        printf '%s' "$inc" ;;
+    */scheduled-maintenances/*) printf '%s' "${STUB_MAINT:-}" ;;
+    */repository/*/tag/*)
+        [ "${STUB_QUAY_RC:-0}" -ne 0 ] && { echo "curl: (28) Operation timed out" >&2; exit "$STUB_QUAY_RC"; }
+        printf '%s' "${STUB_QUAYTAG:-}" ;;
+    */containers/*/exec)
+        [ -n "${STUB_NOEXEC:-}" ] && { printf '{"cause":"no such container"}'; exit 0; }
+        printf '{"Id":"abc123"}' ;;
+    */exec/*/start) printf '%s' "${STUB_OAUTH:-}" ;;
+    *) exit 22 ;;
+esac
+exit 0
+STUB
+cat > "$RSTUBS/kick" <<'STUB'
+#!/bin/bash
+echo "$*" > "$STUB_EXEC_MARK"
+exit "${STUB_KICK_RC:-0}"
+STUB
+chmod +x "$RSTUBS/curl" "$RSTUBS/kick"
+# rchk <plugin> [args]: run a converted plugin against $RSTATE, kicking through the stub
+rchk() { STATE_DIR="$RSTATE" EXEC="$RSTUBS/kick" COLLECT=/collector "$@"; }
+# rcol <collector> [args]: run a collector against $RSTATE with the curl stub
+rcol() { PATH="$RSTUBS:$PATH" STATE_DIR="$RSTATE" "$@"; }
+kick_args() { # <desc> <regex>: the last kick's arguments match
+    if [ -e "$STUB_EXEC_MARK" ] && grep -qE -- "$2" "$STUB_EXEC_MARK"; then echo "  PASS: $1"; PASS=$((PASS + 1))
+    else echo "  FAIL: $1 (kick: $(cat "$STUB_EXEC_MARK" 2>/dev/null))"; FAIL=$((FAIL + 1)); fi
+}
+age_status() { # <file> <secs>: rewrite generated= and every seen= as <secs> ago
+    local t=$(( $(date +%s) - $2 ))
+    sed -i -E "s/generated=[0-9]+/generated=$t/; s/seen=[0-9]+/seen=$t/g" "$1"
+}
+
+echo "=== cloudflare-collect + check_cloudflare_status ==="
+CFC="$LIBEXEC/cloudflare-collect.sh"
+CFZ="$LIBEXEC/check_cloudflare_status.sh"
+CFSTAT="$RSTATE/cloudflare.status"
+ZID1=0123456789abcdef0123456789abcdef
+ZID2=fedcba9876543210fedcba9876543210
+printf '# domain zone-id\nexample.com %s\nexample.org %s\n' "$ZID1" "$ZID2" > "$RSTUBS/zones.conf"
+printf 'tok-SECRET-123\n' > "$RSTUBS/cf.token"
+export STUB_CURL_LOG="$RSTUBS/curl.log"
+cfcol() { : > "$STUB_CURL_LOG"; CF_ZONES="$RSTUBS/zones.conf" CF_TOKEN="$RSTUBS/cf.token" rcol "$CFC"; }
+cfz() { rm -f "$CFSTAT"; cfcol; rchk "$CFZ" "$@"; }
+gql() { # <requests> <cached>
+    printf '{"data":{"viewer":{"zones":[{"httpRequests1hGroups":[{"sum":{"cachedRequests":%s,"requests":%s}}]}]}},"errors":null}' "$2" "$1"
+}
+GQL_SUNSET='{"data":null,"errors":[{"message":"Zone Analytics API is sunset and replaced by GraphQL API","path":["viewer"]}]}'
+STUB_GQL="$(gql 1000 250)" expect "fresh zone is OK with requests and cache ratio" 0 \
+    "^OK - example.com: 1000 requests, 25% cached \\| requests=1000;;;0; cached_pct=25%;;;0;100 collected_age=" no -- cfz example.com
+STUB_GQL='{"data":{"viewer":{"zones":[{"httpRequests1hGroups":[]}]}},"errors":null}' \
+    expect "zero requests is OK no traffic" 0 "^OK - example.org: no traffic in last 24h \\| requests=0" no -- cfz example.org
+STUB_GQL="$GQL_SUNSET" expect "API error is UNKNOWN, not OK no traffic" 3 \
+    "^UNKNOWN - example.com: Cloudflare analytics read failed: api:Zone_Analytics_API_is_sunset" no -- cfz example.com
+STUB_GQL='{"data":{"viewer":{"zones":[]}},"errors":null}' expect "zone the token cannot see is UNKNOWN" 3 \
+    "zone_not_visible_to_token" no -- cfz example.com
+ok_if "token is never on a curl command line" bash -c '! grep -q SECRET "$0"' "$STUB_CURL_LOG"
+rm -f "$CFSTAT"; STUB_GQL="$(gql 1000 250)" cfcol
+ok_if "status file carries no token and no zone ID" bash -c '! grep -qE "SECRET|$1|$2" "$0"' "$CFSTAT" "$ZID1" "$ZID2"
+STUB_GQL_RC=7 cfcol
+expect "failed read keeps the last answer" 0 "^OK - example.com: 1000 requests" no -- rchk "$CFZ" example.com
+sed -i -E "/zone=example.com /s/seen=[0-9]+/seen=$(( $(date +%s) - 700 ))/" "$CFSTAT"
+expect "a zone unread past STALE is UNKNOWN" 3 "^UNKNOWN - example.com: not read from Cloudflare for 0h11m" no -- rchk "$CFZ" example.com
+T0=$SECONDS
+rm -f "$CFSTAT"; STUB_GQL_SLOW=1 PROBE_T=1 BUDGET=3 cfcol
+ok_if "a hung zone call stays inside the budget" [ $((SECONDS - T0)) -le 5 ]
+expect "first-ever timeout is UNKNOWN" 3 "^UNKNOWN - example.com: Cloudflare analytics read failed: curl_exit_" any -- rchk "$CFZ" example.com
+rm -f "$CFSTAT"; STUB_GQL="$(gql 1000 250)" cfcol
+expect "domain not in the conf is UNKNOWN" 3 "^UNKNOWN - example.net is not collected" no -- rchk "$CFZ" example.net
+age_status "$CFSTAT" 150
+expect "status past REFRESH is still judged and starts the collector" 0 "^OK - example.com" yes -- rchk "$CFZ" example.com
+age_status "$CFSTAT" 700
+expect "status past STALE is UNKNOWN collector stale" 3 "^UNKNOWN - collector stale: last collection 0h11m ago" yes -- rchk "$CFZ" example.com
+rm -f "$CFSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file .*collector started" yes -- rchk "$CFZ" example.com
+kick_args "kick is a detached exec in the ctr agent" '^--detach nagios-agent-ctr.crunchtools.com /collector$'
+STUB_KICK_RC=3 expect "failed kick is reported" 3 "collector could not be started" yes -- rchk "$CFZ" example.com
+printf 'CF generated=%s elapsed=1\nCF zone=example.com' "$(date +%s)" > "$CFSTAT"
+expect "truncated status is UNKNOWN" 3 "^UNKNOWN - collector stale: .* truncated" yes -- rchk "$CFZ" example.com
+rm -f "$CFSTAT"
+( flock 9; sleep 3 ) 9>"$RSTATE/.cloudflare.lock" &
+sleep 0.5
+STUB_GQL="$(gql 1 1)" cfcol
+ok_if "a second Cloudflare run exits while the first holds the lock" [ ! -e "$CFSTAT" ]
+wait
+
+echo "=== check_cloudflare_global ==="
+CF="$LIBEXEC/check_cloudflare_global.sh"
+cf_incident() {  # <name> <impact> <component>...
+    local name="$1" impact="$2" comps="" c; shift 2
+    for c in "$@"; do comps="${comps:+$comps,}{\"id\":\"x\",\"name\":\"$c\",\"status\":\"degraded_performance\"}"; done
+    printf '{"id":"i","name":"%s","status":"investigating","impact":"%s","components":[%s]}' "$name" "$impact" "$comps"
+}
+cfg() { rm -f "$CFSTAT"; STUB_GQL="$(gql 1 0)" cfcol; rchk "$CF"; }
+if ! command -v gawk >/dev/null; then
+    echo "  FAIL: gawk is required (cloudflare-collect parses JSON with it)"
+    FAIL=$((FAIL + 1))
+else
+    APAC=$(cf_incident "Network Performance Degradation - Asia-Pacific" minor "Network")
+    WARP=$(cf_incident "Incorrect geo location for some WARP users" minor "WARP")
+    CDN=$(cf_incident "Elevated cache errors" minor "CDN/Cache" "Network")
+    DNS=$(cf_incident "Authoritative DNS failures" major "Authoritative DNS")
+    STUB_INC='{"page":{"name":"Cloudflare"},"incidents":[]}' \
+        expect "no incidents is OK" 0 "^OK - All Cloudflare systems operational" no -- cfg
+    STUB_INC='{"incidents":[]}' STUB_MAINT='{"scheduled_maintenances":[{"name":"x"}],"incidents":[{"name":"DFW maintenance","impact":"maintenance"}]}' \
+        expect "active maintenance is named in the OK line" 0 "^OK - No incidents. Maintenance: DFW maintenance" no -- cfg
+    STUB_INC="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$APAC,$WARP]}" \
+        expect "regional Network and WARP stay OK" 0 "^OK .*2 unrelated" no -- cfg
+    STUB_INC="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$WARP,$CDN]}" \
+        expect "minor CDN/Cache is WARNING" 1 "^WARNING - Cloudflare: Elevated cache errors \\[minor/investigating; CDN/Cache\\]" no -- cfg
+    STUB_INC="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$DNS]}" \
+        expect "major Authoritative DNS is CRITICAL" 2 "^CRITICAL .*Authoritative DNS failures" no -- cfg
+    STUB_INC_RC=6 expect "status page unreachable on a first run is UNKNOWN" 3 "^UNKNOWN - Cannot reach Cloudflare status API \\(curl_exit_6" no -- cfg
+    STUB_INC='<html>gateway</html>' expect "non-JSON status page is UNKNOWN, not OK" 3 "^UNKNOWN - Cannot reach Cloudflare status API" no -- cfg
+    STUB_INC="{\"incidents\":[$DNS]}" STUB_GQL="$(gql 1 0)" cfcol
+    STUB_INC_RC=6 STUB_GQL="$(gql 1 0)" cfcol
+    expect "unreachable status page keeps the last incidents" 2 "^CRITICAL .*Authoritative DNS failures" no -- rchk "$CF"
+    age_status "$CFSTAT" 700
+    expect "status past STALE is UNKNOWN collector stale" 3 "^UNKNOWN - collector stale: last collection" yes -- rchk "$CF"
+    rm -f "$CFSTAT"
+    expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file" yes -- rchk "$CF"
+    # Every listed component must raise an alert on its own. Names were checked
+    # against cloudflarestatus.com/api/v2/components.json when the list was set.
+    while IFS= read -r COMP; do
+        [ -n "$COMP" ] || continue
+        STUB_INC="{\"incidents\":[$(cf_incident "Test incident" minor "$COMP")]}" \
+            expect "listed component alerts: $COMP" 1 "^WARNING .*$COMP" no -- cfg
+    done < <(sed -n '/^RELEVANT_COMPONENTS="/,/^"/p' "$CF" | sed '1d;$d')
+fi
+unset STUB_CURL_LOG
+
+echo "=== quay-collect + check_quay_staleness ==="
+QC="$LIBEXEC/quay-collect.sh"
+QS="$LIBEXEC/check_quay_staleness.sh"
+QSTAT="$RSTATE/quay.status"
+cat > "$RSTUBS/nrpe.cfg" <<'CFG'
+command[check_quay_a]=/usr/local/nagios/libexec/check_quay_staleness.sh example/alpha 8 latest
+command[check_quay_b]=/usr/local/nagios/libexec/check_quay_staleness.sh example/beta 8 latest
+CFG
+qtag() { printf '{"tags": [{"name": "latest", "last_modified": "%s"}], "page": 1}' "$(date -u -d "@$(( $(date +%s) - $1 * 86400 - 60 ))" '+%a, %d %b %Y %H:%M:%S -0000')"; }
+qcol() { NRPE_CFG="$RSTUBS/nrpe.cfg" rcol "$QC" "$@"; }
+qs() { rm -f "$QSTAT"; qcol; rchk "$QS" "$@"; }
+STUB_QUAYTAG="$(qtag 2)" expect "fresh tag is OK" 0 "^OK - example/alpha:latest is 2 days old \\| age=2d;8;;0$" no -- qs example/alpha 8 latest
+ok_if "collector reads every image the NRPE config watches" grep -q 'item=example/beta:latest .*result=ok' "$QSTAT"
+STUB_QUAYTAG="$(qtag 9)" expect "tag past max-days is WARNING" 1 "^WARNING - example/alpha:latest is 9 days old \\[threshold: 8d\\] \\| age=9d;8;;0$" no -- qs example/alpha 8 latest
+STUB_QUAYTAG='{"tags": [], "page": 1}' expect "tag Quay does not have is UNKNOWN" 3 "^UNKNOWN - No tag data for example/alpha:latest" no -- qs example/alpha 8 latest
+STUB_QUAY_RC=28 expect "first-ever Quay failure is UNKNOWN" 3 "^UNKNOWN - Cannot query Quay API for example/alpha:latest \\(curl_exit_28" no -- qs example/alpha 8 latest
+rm -f "$QSTAT"; STUB_QUAYTAG="$(qtag 9)" qcol; STUB_QUAY_RC=28 qcol
+expect "failed read keeps the last answer" 1 "^WARNING - example/alpha:latest is 9 days old" no -- rchk "$QS" example/alpha 8 latest
+sed -i -E "/item=example\\/alpha:latest /s/seen=[0-9]+/seen=$(( $(date +%s) - 700 ))/" "$QSTAT"
+expect "a tag unread past STALE is UNKNOWN" 3 "^UNKNOWN - Quay has not answered for example/alpha:latest in 0h11m" no -- rchk "$QS" example/alpha 8 latest
+rm -f "$QSTAT"; STUB_QUAYTAG="$(qtag 1)" qcol
+expect "image not in the file is UNKNOWN and is kicked by name" 3 "^UNKNOWN - example/gamma:v1 is not collected yet \\(collector started\\)" yes -- rchk "$QS" example/gamma 8 v1
+kick_args "kick carries the image" '^--detach nagios-agent-ctr.crunchtools.com /collector example/gamma v1$'
+STUB_QUAYTAG="$(qtag 1)" qcol example/gamma v1
+expect "an image named by a kick is collected" 0 "^OK - example/gamma:v1 is 1 days old" no -- rchk "$QS" example/gamma 8 v1
+age_status "$QSTAT" 150
+expect "status past REFRESH is still judged and starts the collector" 0 "^OK - example/alpha:latest" yes -- rchk "$QS" example/alpha 8 latest
+age_status "$QSTAT" 700
+expect "status past STALE is UNKNOWN collector stale" 3 "^UNKNOWN - collector stale: last collection 0h11m" yes -- rchk "$QS" example/alpha 8 latest
+rm -f "$QSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file .*collector started" yes -- rchk "$QS" example/alpha 8 latest
+expect "bad repo argument is rejected" 3 "^UNKNOWN - usage" no -- rchk "$QS" '../x' 8 latest
+
+echo "=== google-oauth-collect + check_google_oauth ==="
+GC="$LIBEXEC/google-oauth-collect.sh"
+GO="$LIBEXEC/check_google_oauth.sh"
+GSTAT="$RSTATE/google-oauth.status"
+printf '# key container credential label\npersonal ctr-a /cred/a.json alice@example.com\nwork ctr-b /cred/b.json bob@example.org\n' > "$RSTUBS/accounts.conf"
+gcol() { GOOGLE_ACCOUNTS="$RSTUBS/accounts.conf" rcol "$GC"; }
+gchk() { GOOGLE_ACCOUNTS="$RSTUBS/accounts.conf" rchk "$GO" "$@"; }
+go() { rm -f "$GSTAT"; gcol; gchk "$@"; }
+STUB_OAUTH=$'\x01\x02\x12OAUTH|200|3599\r\n' expect "valid token is OK" 0 \
+    "^OK - alice@example.com: refresh token valid \\(access token good for 3599s\\) \\| token_ok=1$" no -- go personal
+ok_if "both accounts are collected in one pass" grep -q 'key=work .*result=200' "$GSTAT"
+STUB_OAUTH='OAUTH|400|invalid_grant' expect "rejected token is CRITICAL" 2 \
+    "^CRITICAL - bob@example.org: refresh token REJECTED \\(HTTP 400 invalid_grant\\)" no -- go work
+STUB_OAUTH='OAUTH|NOTOKEN|refresh_token' expect "credential without a token is CRITICAL" 2 "^CRITICAL - alice@example.com: credential file holds no usable refresh token" no -- go personal
+STUB_OAUTH='OAUTH|NET|URLError' expect "first-ever network failure is UNKNOWN" 3 "^UNKNOWN - alice@example.com: ctr-a could not reach Google \\(URLError\\)" no -- go personal
+STUB_NOEXEC=1 expect "backend not answering is UNKNOWN" 3 "^UNKNOWN - alice@example.com: could not create exec in ctr-a" no -- go personal
+rm -f "$GSTAT"; STUB_OAUTH='OAUTH|200|3599' gcol; STUB_OAUTH='OAUTH|503|unknown' gcol
+expect "a Google 5xx keeps the last answer" 0 "^OK - alice@example.com: refresh token valid" no -- gchk personal
+sed -i -E "/key=personal /s/seen=[0-9]+/seen=$(( $(date +%s) - 700 ))/" "$GSTAT"
+expect "an answer older than STALE is UNKNOWN" 3 "^UNKNOWN - alice@example.com: token not tested for 0h11m \\(last: 200 3599\\)" no -- gchk personal
+rm -f "$GSTAT"; STUB_OAUTH='OAUTH|401|unauthorized_client' gcol; STUB_OAUTH='OAUTH|NET|timeout' gcol
+sed -i -E "s/seen=[0-9]+/seen=$(( $(date +%s) - 700 ))/" "$GSTAT"
+expect "an old rejection stays CRITICAL" 2 "^CRITICAL - alice@example.com: refresh token REJECTED \\(HTTP 401" no -- gchk personal
+rm -f "$GSTAT"; STUB_OAUTH='OAUTH|200|3599' gcol; age_status "$GSTAT" 150
+expect "status past REFRESH is still judged and starts the collector" 0 "^OK - alice@example.com" yes -- gchk personal
+age_status "$GSTAT" 700
+expect "status past STALE is UNKNOWN collector stale" 3 "^UNKNOWN - collector stale: last collection 0h11m" yes -- gchk personal
+rm -f "$GSTAT"
+expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file .*collector started" yes -- gchk personal
+expect "unknown account key is UNKNOWN" 3 "^UNKNOWN - account key 'nobody' not found" no -- gchk nobody
+rm -rf "$RSTATE" "$RSTUBS"
 
 echo "=== check_container_postgres ==="
 PG="$LIBEXEC/check_container_postgres.sh"

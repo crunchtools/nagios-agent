@@ -10,6 +10,16 @@
 # This container is ALLOWED to be slow. Its Nagios liveness probe
 # ("NRPE daemon (containers)") is the dependency parent for every check it
 # serves, so when it degrades the result is one correlated alert, not 135.
+#
+# STATE (7.1.0). The Cloudflare, Quay, registry drift and Google OAuth checks
+# served here judge status files their collectors write to
+# /var/lib/nagios-agent, and start those collectors in THIS container through
+# `podman_exec.sh --detach`, because this is where their confs and the
+# Cloudflare token are mounted. The mount is the same
+# /srv/nagios-agent.crunchtools.com/data the host agent uses for the backup
+# status files; file names do not overlap. Both containers are --privileged, so
+# :Z relabels to the same shared level and neither locks the other out, the
+# same as the scripts dir both already mount.
 Description=Podman container - nagios-agent-ctr.crunchtools.com (NRPE Agent, container pool)
 Documentation=https://github.com/crunchtools/nagios-agent
 Wants=network-online.target
@@ -21,7 +31,8 @@ Restart=always
 RestartSec=10
 ExecStartPre=/usr/bin/sleep 1.5
 ExecStartPre=-/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
-ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent-ctr.crunchtools.com.service   --memory=384m --memory-swap=384m   --rm   --name nagios-agent-ctr.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-ctr.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf:/etc/nagios/cloudflare-zones.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/google-accounts.conf:/etc/nagios/google-accounts.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/registry-images.conf:/etc/nagios/registry-images.conf:ro,Z   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   quay.io/crunchtools/nagios-agent:latest
+ExecStartPre=/usr/bin/mkdir -p /srv/nagios-agent.crunchtools.com/data
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent-ctr.crunchtools.com.service   --memory=384m --memory-swap=384m   --rm   --name nagios-agent-ctr.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-ctr.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf:/etc/nagios/cloudflare-zones.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/google-accounts.conf:/etc/nagios/google-accounts.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/registry-images.conf:/etc/nagios/registry-images.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/data:/var/lib/nagios-agent:Z   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   quay.io/crunchtools/nagios-agent:latest
 ExecStop=/usr/bin/podman stop -t 10 nagios-agent-ctr.crunchtools.com
 ExecStopPost=/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
 
