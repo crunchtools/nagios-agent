@@ -644,6 +644,7 @@ GSTUBS="$(mktemp -d)"
 cat > "$GSTUBS/git" <<'STUB'
 #!/bin/bash
 [ -n "${STUB_GIT_SLOW:-}" ] && exec sleep 30
+[ -n "${STUB_GIT_SLOW_REPO:-}" ] && [[ "${!#}" == */"$STUB_GIT_SLOW_REPO" ]] && exec sleep 30
 [ -n "${STUB_TAG:-}" ] && printf 'deadbeef\trefs/tags/v%s\n' "$STUB_TAG"
 exit 0
 STUB
@@ -717,6 +718,14 @@ T0=$SECONDS
 rm -f "$RDSTAT"; STUB_GIT_SLOW=1 BUDGET=1 REGISTRY_DRIFT_TIMEOUT=2 rdcol
 ok_if "a hung git call stays inside the budget" [ $((SECONDS - T0)) -le 4 ]
 expect "an image the budget cut off is UNKNOWN by name" 3 "unreadable: svc\\(budget\\)" no -- rdchk
+# Answers are matched to images by name: a finished image keeps its answer
+# beside one the budget cut off, and a name the conf rule rejects is dropped.
+printf 'svc svc\nslow slow\nbad bad/x\n' > "$GSTUBS/images.conf"
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" STUB_GIT_SLOW_REPO=slow BUDGET=2 REGISTRY_DRIFT_TIMEOUT=3 rdcol
+expect "answers are matched by image, missing ones UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - 1/2 images could not be checked. unreadable: slow\\(budget\\)" no -- rdchk
+ok_if "finished image keeps its own answer" grep -q '^RDRIFT item=svc seen=[0-9]* kind=CLEAN$' "$RDSTAT"
+ok_if "an image name the conf rule rejects is not recorded" bash -c '! grep -q "item=bad" "$0"' "$RDSTAT"
+echo "svc svc" > "$GSTUBS/images.conf"
 rm -f "$RDSTAT"
 PATH="$GSTUBS:$PATH" STATE_DIR="$RDSTATE" REGISTRY_DRIFT_CONF=/nonexistent "$RDC"
 expect "unreadable image list is UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - cannot read image list" no -- rdchk
