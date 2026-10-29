@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   mcp-gw-work, mcp-jira, mcp-workboard and mcp-slack checks, matching what
   lotor has deployed since that stack was decommissioned (clears the
   Config drift cross-repo warning).
+- Registry drift asks Quay for the release tag by name (`specificTag`). The
+  tag listing is newest first and capped at 100, so rotv, which tags every
+  commit, pushed 1.65.5 off the page and read as MISSING while Quay had it.
 
 ## [7.2.0] - 2026-10-26
 
