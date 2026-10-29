@@ -86,9 +86,19 @@ tag_present() {
     printf '%s\n' "$tags" | grep -qxF "v$want"
 }
 
+# Asks for tag <want> by name, then v<want> only if that found nothing. A plain
+# listing is newest first and capped at 100, so a repo that tags every commit
+# (rotv) pushed its release tag off the page and read as MISSING while Quay
+# had it (2026-10-29).
 quay_body() {
-    curl -sf --max-time "$NET_TIMEOUT" \
-        "${QUAY_API}/repository/${ORG}/$1/tag/?onlyActiveTags=true&limit=100"
+    local t body
+    for t in "$2" "v$2"; do
+        body=$(curl -sf --max-time "$NET_TIMEOUT" \
+            "${QUAY_API}/repository/${ORG}/$1/tag/?onlyActiveTags=true&specificTag=${t}") || return 1
+        printf '%s\n' "$body"
+        [ -n "$(quay_names "$body")" ] && return 0
+    done
+    return 0
 }
 
 quay_names() { printf '%s' "$1" | grep -oP '"name":\s*"\K[^"]+'; }
@@ -160,7 +170,7 @@ check_one() {
 
     gaps=""
 
-    if qb=$(quay_body "$img"); then
+    if qb=$(quay_body "$img" "$tag"); then
         qt=$(quay_names "$qb")
         tag_present "$qt" "$tag" || gaps="quay"
     else
