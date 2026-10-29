@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.2.1] - 2026-10-29
+
 ### Fixed
 - `deploy/nagios-agent/nrpe-ctr.cfg` and `registry-images.conf` drop the
   mcp-gw-work, mcp-jira, mcp-workboard and mcp-slack checks, matching what
