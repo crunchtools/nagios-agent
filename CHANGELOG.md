@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `deploy/nagios-agent/nrpe-ctr.cfg` and `registry-images.conf` drop the
+  mcp-gw-work, mcp-jira, mcp-workboard and mcp-slack checks, matching what
+  lotor has deployed since that stack was decommissioned (clears the
+  Config drift cross-repo warning).
+
 ## [7.2.0] - 2026-10-26
 
 ### Changed
