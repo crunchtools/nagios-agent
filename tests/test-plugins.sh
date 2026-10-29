@@ -761,7 +761,21 @@ cat > "$GSTUBS/curl" <<'STUB'
 for a in "$@"; do
     case "$a" in
         --unix-socket) printf '%s' "${STUB_LOCAL:-[]}"; exit 0 ;;
-        */tag/*) [ -n "${STUB_QUAY_FAIL:-}" ] && exit 22; printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
+        */tag/*)
+            [ -n "${STUB_QUAY_FAIL:-}" ] && exit 22
+            # STUB_QUAY_HAS set: answer specificTag lookups like Quay, from
+            # that list of tag names, logging each name asked for.
+            if [ -n "${STUB_QUAY_HAS+x}" ]; then
+                t=${a##*specificTag=}
+                echo "$t" >> "$STUB_QUAY_LOG"
+                [ -n "${STUB_QUAY_FAIL_V:-}" ] && [ "${t#v}" != "$t" ] && exit 22
+                case " $STUB_QUAY_HAS " in
+                    *" $t "*) printf '{"tags": [{"name": "%s", "start_ts": 1}]}' "$t" ;;
+                    *) printf '{"tags": [], "page": 1, "has_additional": false}' ;;
+                esac
+                exit 0
+            fi
+            printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
         */token*) printf '{"token":"t"}'; exit 0 ;;
         */tags/list*) printf '%s' "${STUB_GHCR:-}"; exit 0 ;;
     esac
@@ -805,6 +819,19 @@ if command -v sqlite3 >/dev/null; then
 fi
 STUB_TAG="" STUB_QUAY="$(quayj 1)" STUB_GHCR="$GH_HAS" \
     expect "untagged repo always warns" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 1 untagged" any -- rd
+# Quay is asked for the release tag by name, so tags pushed after it (rotv
+# tags every commit) can't page it out of view.
+export STUB_QUAY_LOG="$GSTUBS/quay.log"
+rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="1.2.0" STUB_GHCR="$GH_HAS" \
+    expect "the release tag is found by name" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
+ok_if "a found bare tag needs one Quay request" [ "$(cat "$STUB_QUAY_LOG")" = "1.2.0" ]
+rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="v1.2.0" STUB_GHCR="$GH_HAS" \
+    expect "a v-prefixed release tag is found" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
+ok_if "the v-prefixed tag is asked for after the bare one" [ "$(tr '\n' ' ' < "$STUB_QUAY_LOG")" = "1.2.0 v1.2.0 " ]
+STUB_TAG=1.2.0 STUB_QUAY_HAS="" STUB_GHCR="$GH_HAS" \
+    expect "a tag Quay has under neither name is missing" 1 "^REGISTRY DRIFT WARNING - .*missing: svc:1.2.0\\[quay\\]" any -- rd
+STUB_TAG=1.2.0 STUB_QUAY_HAS="" STUB_QUAY_FAIL_V=1 STUB_GHCR="$GH_HAS" \
+    expect "a failed v-prefixed lookup is UNKNOWN, not missing" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(quay\\)" any -- rd
 echo "=== registry-drift-collect (status file, kick) ==="
 printf 'svc svc\nsvc svc\n' > "$GSTUBS/images.conf"
 STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" \
