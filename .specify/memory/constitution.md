@@ -4,7 +4,7 @@
 > **Ratified:** 2026-09-19
 > **Amended:** 2026-10-24
 > **Status:** Active
-> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.27.0
+> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.28.0
 > **Profile:** Container Image
 
 This file holds what is specific to nagios-agent. The fleet rules and the
