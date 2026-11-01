@@ -25,6 +25,10 @@
 # the perfdata and never reported as drift. Third-party images are not ours to
 # police and are ignored.
 #
+# quay.io/crunchtools/pbs is ignored too: its containers are one-shot backup
+# jobs that pull the image themselves with --pull=newer, and the autoupdate
+# label would let auto-update restart one mid-backup.
+#
 # GRACE_HOURS defaults to 30. podman-auto-update.timer fires once a day at
 # 03:00 ET (the maintenance-window drop-in), so a tag pushed at 03:01
 # legitimately waits ~24h. Anything older than that missed a run.
