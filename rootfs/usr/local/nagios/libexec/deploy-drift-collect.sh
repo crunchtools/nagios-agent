@@ -82,6 +82,9 @@ check_one() {
     ref=$(printf '%s' "$raw" | grep -oP '"ImageName":\s*"\K[^"]+' | head -1)
     case "$ref" in "$PREFIX"*) ;; *) printf '%s IGNORED\n' "${id:0:12}"; return ;; esac
     case "$ref" in *@sha256:*) printf '%s PINNED\n' "${id:0:12}"; return ;; esac
+    # pbs runs as one-shot backup jobs that pull their own image (--pull=newer).
+    # The autoupdate label would let auto-update restart one mid-backup.
+    case "$ref" in "${PREFIX}pbs:"*) printf '%s IGNORED\n' "${id:0:12}"; return ;; esac
 
     auto=$(printf '%s' "$raw" | grep -oP '"io\.containers\.autoupdate":\s*"\K[^"]+' | head -1)
     if [ "$auto" != "registry" ]; then

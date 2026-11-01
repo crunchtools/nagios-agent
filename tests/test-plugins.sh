@@ -582,6 +582,8 @@ STUB_SOCK=$(ctr quay.io/crunchtools/svc@sha256:aa "" sha256:aa) \
     expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" no -- dd
 STUB_SOCK=$(ctr ghcr.io/other/svc:latest "" sha256:aa) \
     expect "third-party image is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " no -- dd
+STUB_SOCK=$(ctr quay.io/crunchtools/pbs:latest "" sha256:aa) \
+    expect "one-shot pbs backup job is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
     expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") dd >/dev/null
