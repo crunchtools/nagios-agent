@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.2.2] - 2026-11-01
+
 ### Fixed
 - Deploy drift ignores `quay.io/crunchtools/pbs`. Its containers are one-shot
   backup jobs that pull their own image, so the unmanaged warning fired on every
