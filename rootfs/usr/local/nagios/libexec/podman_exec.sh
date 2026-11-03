@@ -28,7 +28,12 @@ ATTACH=true; [ "$DETACH" -eq 1 ] && ATTACH=false
 
 CMD_JSON=""
 for arg in "$@"; do
-    arg=$(echo "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    # Backslash first, then quote, then the control characters a literal
+    # newline or tab would otherwise smuggle into the JSON string. An
+    # unescaped newline makes the body invalid, the API refuses the exec, and
+    # the only symptom is "Cannot create exec" — which reads like a container
+    # problem rather than a quoting one. Found the hard way (RT#1548).
+    arg=$(printf '%s' "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     CMD_JSON="${CMD_JSON}\"${arg}\","
 done
 CMD_JSON="${CMD_JSON%,}"

@@ -20,9 +20,7 @@ fi
 
 EXEC=${PODMAN_EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 
-PROBE='kill -0 "$(cat /run/opendkim/opendkim.pid 2>/dev/null)" 2>/dev/null || { echo nopid; exit 0; }
-exec 3<>/dev/tcp/127.0.0.1/8891 2>/dev/null || { echo nosocket; exit 0; }
-echo ok'
+PROBE='kill -0 "$(cat /run/opendkim/opendkim.pid 2>/dev/null)" 2>/dev/null || { echo nopid; exit 0; }; exec 3<>/dev/tcp/127.0.0.1/8891 2>/dev/null || { echo nosocket; exit 0; }; echo ok'
 
 OUT=$("$EXEC" "$CONTAINER" sh -c "$PROBE" 2>&1)
 RC=$?

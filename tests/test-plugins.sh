@@ -1175,6 +1175,45 @@ STUB_EXEC='localhost:5432 - no response' STUB_EXEC_RC=2 \
     expect "no response is still CRITICAL" 2 "^CRITICAL - PostgreSQL in ctr not accepting connections" yes -- "$PG" ctr
 STUB_EXEC='7' STUB_EXEC_RC=0 expect "accepting with few connections is OK" 0 "^OK - PostgreSQL in ctr: 7 active" yes -- "$PG" ctr
 
+echo "=== podman_exec.sh request body ==="
+# podman_exec.sh hand-builds the exec request as JSON. A literal newline or
+# tab in an argument used to go straight into the string, making the body
+# invalid; the API refused the exec and the only symptom was
+# "Cannot create exec", which reads like a container problem rather than a
+# quoting one (RT#1548). This asserts the body parses. It targets the request
+# body and not a plugin, because the plugin tests stub podman_exec.sh out and
+# never look at the arguments, which is why this went unnoticed.
+PESTUBS="$(mktemp -d)"
+# Capture the exec CREATE body only. podman_exec.sh also POSTs to
+# .../exec/<id>/start, whose body is a fixed {"Detach":false} and always
+# parses — capturing that instead is how an earlier version of this test
+# passed against the very escaper it was meant to catch.
+cat > "$PESTUBS/curl" <<'STUB'
+#!/bin/bash
+url=""; body=""; prev=""
+for a in "$@"; do
+    [ "$prev" = "-d" ] && body="$a"
+    case "$a" in http*) url="$a" ;; esac
+    prev="$a"
+done
+case "$url" in */exec) printf '%s' "$body" > "$PE_BODY" ;; esac
+printf '%s' '{"Id":"deadbeef"}'
+STUB
+chmod +x "$PESTUBS/curl"
+for arg in 'plain' 'two
+lines' 'tab	with "quote"' 'back\slash'; do
+    PE_BODY="$PESTUBS/body.json" PATH="$PESTUBS:$PATH" \
+        "$LIBEXEC/podman_exec.sh" ctr sh -c "$arg" >/dev/null 2>&1
+    label=$(printf '%s' "$arg" | tr '\n\t' '..' | head -c 20)
+    if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$PESTUBS/body.json" 2>/dev/null; then
+        echo "  PASS: request body is valid JSON for $label"; PASS=$((PASS + 1))
+    else
+        echo "  FAIL: invalid JSON body for argument: $label"
+        cat "$PESTUBS/body.json"; FAIL=$((FAIL + 1))
+    fi
+done
+rm -rf "$PESTUBS"
+
 echo "=== check_container_opendkim ==="
 DK="$LIBEXEC/check_container_opendkim.sh"
 expect "no container argument is UNKNOWN" 3 "^UNKNOWN - Usage:" no -- "$DK"
