@@ -59,7 +59,12 @@ CONF=${CONF:-/etc/nagios/rclone.conf}
 BUDGET=${BUDGET:-120}     # seconds for the whole servers run
 PROBE_T=${PROBE_T:-30}    # seconds per listing
 PERSONAL_T=${PERSONAL_T:-60}
-BASE=${BASE:-pcloud:Backups/Servers/lotor.dc3.crunchtools.com}
+# pbs writes each host's rotations under its own FQDN. The agent container has
+# its own UTS namespace but podman copies the host's name into it, so the
+# kernel hostname is the host's: lotor.dc3 until the cutover, gloval.dc4 after.
+# A hardcoded host here kept judging lotor's frozen backups (RT #1546).
+HOST_FQDN=${HOST_FQDN:-$(cat /proc/sys/kernel/hostname 2>/dev/null)}
+BASE=${BASE:-pcloud:Backups/Servers/$HOST_FQDN}
 ROTATIONS=${ROTATIONS:-pcloud:Backups/Rotations}
 
 case "$MODE" in
@@ -111,7 +116,7 @@ collect_personal() {
 #   mode=dir  : newest *.db / *.sqlite* under path (recursive); ties go to the largest
 # Weekly-1 holds one dump (or data dir) per service. Monthly-1/2 alternate
 # months and are proxied by two representative dumps each. The .sql dumps never
-# exist on lotor's disk: pbs writes them inside its container and copies them
+# exist on the host's disk: pbs writes them inside its container and copies them
 # straight to pCloud. Decommissioned services (zabbix) are deliberately absent.
 # takeda (ex-openclaw, renamed 2026-10-25) is takeda-db.
 SENTINELS="

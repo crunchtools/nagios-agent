@@ -284,8 +284,12 @@ STUB_GONE=rt4.sql STUB_SLOW=feeds.db PROBE_T=1 BUDGET=8 \
     expect "MISSING outranks TIMEOUT" 2 "^BACKUPS CRITICAL - rt-db: MISSING .*\\[\\+1 more\\].*unknown=1 .*"$'\n'"rt-db: MISSING.*"$'\n'"mcp-feeds-db: TIMEOUT" any -- bf
 STUB_SIZE=10 expect "shrunken dump" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: TOO SMALL 10B" any -- bf
 T0=$SECONDS
-STUB_SLOW=lotor PROBE_T=2 BUDGET=3 expect "exhausted deadline leaves sentinels UNCHECKED" 3 "^BACKUPS UNKNOWN - [a-z0-9-]+: TIMEOUT .*, 19 unchecked;.*UNCHECKED \\(out of time\\)" any -- bf
+STUB_SLOW=Backups/Servers PROBE_T=2 BUDGET=3 expect "exhausted deadline leaves sentinels UNCHECKED" 3 "^BACKUPS UNKNOWN - [a-z0-9-]+: TIMEOUT .*, 19 unchecked;.*UNCHECKED \\(out of time\\)" any -- bf
 within 4 "exhausted deadline does not overrun"
+# The listed path follows the host: gloval judged lotor's frozen rotations (RT #1546).
+rm -f "$BSTAT"; : > "$STUB_CALLS"; HOST_FQDN=gloval.test RCLONE="$BSTUBS/rclone" CONF=/dev/null "$COL" servers
+if [ "$(grep -c '^pcloud:Backups/Servers/gloval.test/' "$STUB_CALLS")" = 19 ]; then echo "  PASS: every listing is under the host's own FQDN"; PASS=$((PASS + 1))
+else echo "  FAIL: listings not under HOST_FQDN: $(grep -v '^pcloud:Backups/Servers/gloval.test/' "$STUB_CALLS" | head -1)"; FAIL=$((FAIL + 1)); fi
 # The live-read failure this release exists for: a slow listing after a good run.
 rm -f "$BSTAT"; scol
 STUB_SLOW=crunchtools.com/backups PROBE_T=1 BUDGET=6 scol

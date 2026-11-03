@@ -1,5 +1,5 @@
 #!/bin/bash
-# check_backup_freshness.sh — pCloud server backup freshness for lotor (Nagios/NRPE)
+# check_backup_freshness.sh — pCloud server backup freshness for this host (Nagios/NRPE)
 #
 # Judges the status file backup-freshness-collect.sh writes; never touches
 # pCloud itself (7.0.0). Listing 19 sentinels live inside NRPE's 15s
