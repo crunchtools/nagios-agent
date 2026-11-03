@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `deploy/nagios/registry-drift.cfg` attaches the check to gloval, where it
+  is deployed since the lotor cutover (RT #1546).
+
 ## [7.3.2] - 2026-11-03
 
 ### Fixed
