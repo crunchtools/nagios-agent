@@ -727,6 +727,37 @@ STUB_EXEC="$(units 1 1 $((T - 18000)))" expect "5h-old unit drift is WARNING" 1 
 STUB_EXEC="$(units 1 0)" expect "undated drift counts as aged" 1 "^UNIT DRIFT WARNING - drift 4h" yes -- ud
 STUB_EXEC="$(units 1 0 $((T - 1800)))" WARN=600 expect "WARN env overrides the grace" 1 "^UNIT DRIFT WARNING - drift 30m" yes -- ud
 
+echo "=== check_selinux_drift ==="
+SD="$LIBEXEC/check_selinux_drift.sh"
+sd() { EXEC="$STUBS/podman_exec.sh" "$SD"; }
+sdout() { printf 'SELINUXDRIFT file=present\nSELINUXDRIFT live_only=%s\nSELINUXDRIFT file_only=%s\nSELINUXDRIFT list=%s\nSELINUXDRIFT end=1\n' "$1" "$2" "${3:-}"; }
+STUB_EXEC="$(sdout 0 0)" expect "matching SELinux state is OK" 0 "^SELINUX DRIFT OK - live customizations match /srv" yes -- sd
+STUB_EXEC="$(sdout 1 1 'boolean virt_use_nfs')" expect "flipped boolean is WARNING and named" 1 "^SELINUX DRIFT WARNING - 1 live setting\\(s\\) not in /srv, 1 in /srv not live \\(boolean virt_use_nfs\\)" yes -- sd
+STUB_EXEC=$'SELINUXDRIFT file=missing\nSELINUXDRIFT end=1' expect "missing export file is WARNING" 1 "^SELINUX DRIFT WARNING - .*local.semanage is missing" yes -- sd
+STUB_EXEC=$'SELINUXDRIFT error=semanage export failed\nSELINUXDRIFT end=1' expect "collector error is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector reported: semanage export failed" yes -- sd
+STUB_EXEC="SELINUXDRIFT file=present" expect "truncated output is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector output truncated" yes -- sd
+STUB_EXEC_RC=125 expect "exec failure is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector exec" yes -- sd
+
+echo "=== selinux-drift-collect ==="
+SX="$(mktemp -d)"
+cat > "$SX/semanage" <<'STUB'
+#!/bin/bash
+[ -n "${STUB_SEMANAGE_FAIL:-}" ] && exit 1
+printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -%s virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp 22422\n' "${STUB_NFS:-1}"
+STUB
+chmod +x "$SX/semanage"
+printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -1 virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp 22422\n' > "$SX/local.semanage"
+sx() { FILE="$SX/local.semanage" SEMANAGE="$SX/semanage" "$LIBEXEC/selinux-drift-collect.sh"; }
+OUT=$(sx)
+ok_if "collector: identical state counts 0/0" grep -qz "live_only=0.*file_only=0.*end=1" <<< "$OUT"
+OUT=$(STUB_NFS=0 sx)
+ok_if "collector: flipped boolean counts 1/1 and names it" grep -qz "live_only=1.*file_only=1.*list=boolean virt_use_nfs.*end=1" <<< "$OUT"
+OUT=$(STUB_SEMANAGE_FAIL=1 sx)
+ok_if "collector: semanage failure reports an error" grep -q "SELINUXDRIFT error=semanage export failed" <<< "$OUT"
+OUT=$(FILE="$SX/absent" SEMANAGE="$SX/semanage" "$LIBEXEC/selinux-drift-collect.sh")
+ok_if "collector: missing file reported" grep -q "SELINUXDRIFT file=missing" <<< "$OUT"
+rm -rf "$SX"
+
 echo "=== srv-drift-collect (unit_drift_since) ==="
 SC="$(mktemp -d)"
 mkdir -p "$SC/srv/a/config" "$SC/etc"; git init -q "$SC/srv"

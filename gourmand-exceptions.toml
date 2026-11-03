@@ -458,3 +458,15 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/config-drift-repos-collect.sh"
 justification = "Not an NRPE plugin: the slow half of the 7.2.0 cross-repo config drift split (constitution XVI). check_config_drift.sh starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside it."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_selinux_drift.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/selinux-drift-collect.sh"
+justification = "Not an NRPE plugin: the root half of check_selinux_drift.sh's privilege split, run through podman_exec.sh like srv-drift-collect.sh, so it ships beside the plugin at the libexec path it invokes."
+classification = "by_design"

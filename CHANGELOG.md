@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.3.0] - 2026-11-03
+
+### Added
+
+- "SELinux Drift" check (`check_selinux_drift.sh`, collector
+  `selinux-drift-collect.sh`): warns when the host's local SELinux booleans,
+  ports or file-context rules differ from the git-tracked
+  `/srv/selinux-local/config/local.semanage` that `selinux-local.service`
+  re-applies at boot. Those settings live in `/var/lib/selinux`, outside the
+  `/etc` backup, and hand fixes made on lotor were lost on gloval (RT #1546).
+
 ## [7.2.4] - 2026-11-03
 
 ### Fixed
