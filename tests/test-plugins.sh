@@ -1175,6 +1175,23 @@ STUB_EXEC='localhost:5432 - no response' STUB_EXEC_RC=2 \
     expect "no response is still CRITICAL" 2 "^CRITICAL - PostgreSQL in ctr not accepting connections" yes -- "$PG" ctr
 STUB_EXEC='7' STUB_EXEC_RC=0 expect "accepting with few connections is OK" 0 "^OK - PostgreSQL in ctr: 7 active" yes -- "$PG" ctr
 
+echo "=== check_container_opendkim ==="
+DK="$LIBEXEC/check_container_opendkim.sh"
+expect "no container argument is UNKNOWN" 3 "^UNKNOWN - Usage:" no -- "$DK"
+STUB_EXEC='ok' STUB_EXEC_RC=0 \
+    expect "running and listening is OK" 0 "^OK - opendkim running and listening in ctr" yes -- "$DK" ctr
+# A dead signer must be CRITICAL, not a warning: mail keeps flowing unsigned,
+# so nothing else will report it.
+STUB_EXEC='nopid' STUB_EXEC_RC=0 \
+    expect "a dead signer is CRITICAL and says mail is unsigned" 2 "^CRITICAL - opendkim not running in ctr: outbound mail is going out unsigned" yes -- "$DK" ctr
+STUB_EXEC='nosocket' STUB_EXEC_RC=0 \
+    expect "up but not accepting connections is CRITICAL" 2 "^CRITICAL - opendkim in ctr is not listening on 127.0.0.1:8891" yes -- "$DK" ctr
+# An unreachable container is our blind spot, not the signer's fault.
+STUB_EXEC='no container with name or ID "ctr"' STUB_EXEC_RC=3 \
+    expect "an unreachable container is UNKNOWN, not an outage" 3 "^UNKNOWN - cannot reach ctr:" yes -- "$DK" ctr
+STUB_EXEC='something else entirely' STUB_EXEC_RC=0 \
+    expect "an unrecognised probe result is UNKNOWN, not OK" 3 "^UNKNOWN - unexpected probe result from ctr" yes -- "$DK" ctr
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
