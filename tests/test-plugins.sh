@@ -737,21 +737,30 @@ STUB_EXEC=$'SELINUXDRIFT file=missing\nSELINUXDRIFT end=1' expect "missing expor
 STUB_EXEC=$'SELINUXDRIFT error=semanage export failed\nSELINUXDRIFT end=1' expect "collector error is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector reported: semanage export failed" yes -- sd
 STUB_EXEC="SELINUXDRIFT file=present" expect "truncated output is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector output truncated" yes -- sd
 STUB_EXEC_RC=125 expect "exec failure is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector exec" yes -- sd
+STUB_EXEC="$(sdout x 0)" expect "non-numeric count is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector returned a non-numeric count" yes -- sd
+STUB_EXEC=$'SELINUXDRIFT file=present\nSELINUXDRIFT file_only=0\nSELINUXDRIFT end=1' expect "missing count is UNKNOWN" 3 "^SELINUX DRIFT UNKNOWN - collector returned a non-numeric count" yes -- sd
 
 echo "=== selinux-drift-collect ==="
 SX="$(mktemp -d)"
 cat > "$SX/semanage" <<'STUB'
 #!/bin/bash
 [ -n "${STUB_SEMANAGE_FAIL:-}" ] && exit 1
-printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -%s virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp 22422\n' "${STUB_NFS:-1}"
+printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -%s virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp %s\nfcontext -a -f a -t %s -r '"'"'s0'"'"' '"'"'/srv/x/bin(/.*)?'"'"'\n' "${STUB_NFS:-1}" "${STUB_PORT:-22422}" "${STUB_FCTX:-bin_t}"
 STUB
 chmod +x "$SX/semanage"
-printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -1 virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp 22422\n' > "$SX/local.semanage"
+printf 'boolean -D\nboolean -m -1 httpd_can_network_connect\nboolean -m -1 virt_use_nfs\nport -a -t ssh_port_t -r '"'"'s0'"'"' -p tcp 22422\nfcontext -a -f a -t bin_t -r '"'"'s0'"'"' '"'"'/srv/x/bin(/.*)?'"'"'\n' > "$SX/local.semanage"
 sx() { FILE="$SX/local.semanage" SEMANAGE="$SX/semanage" "$LIBEXEC/selinux-drift-collect.sh"; }
 OUT=$(sx)
 ok_if "collector: identical state counts 0/0" grep -qz "live_only=0.*file_only=0.*end=1" <<< "$OUT"
 OUT=$(STUB_NFS=0 sx)
 ok_if "collector: flipped boolean counts 1/1 and names it" grep -qz "live_only=1.*file_only=1.*list=boolean virt_use_nfs.*end=1" <<< "$OUT"
+OUT=$(STUB_PORT=2222 sx)
+ok_if "collector: added port is live-only and named" grep -qz "live_only=1.*file_only=1.*list=port 2222,port 22422.*end=1" <<< "$OUT"
+OUT=$(STUB_FCTX=httpd_sys_content_t sx)
+ok_if "collector: changed file-context rule is named by path" grep -qz "live_only=1.*file_only=1.*list=fcontext /srv/x/bin(/\.\*)?.*end=1" <<< "$OUT"
+: > "$SX/empty"
+OUT=$(FILE="$SX/empty" SEMANAGE="$SX/semanage" "$LIBEXEC/selinux-drift-collect.sh")
+ok_if "collector: empty file counts only live settings, no blank record" grep -qz "live_only=4.*file_only=0.*end=1" <<< "$OUT"
 OUT=$(STUB_SEMANAGE_FAIL=1 sx)
 ok_if "collector: semanage failure reports an error" grep -q "SELINUXDRIFT error=semanage export failed" <<< "$OUT"
 OUT=$(FILE="$SX/absent" SEMANAGE="$SX/semanage" "$LIBEXEC/selinux-drift-collect.sh")

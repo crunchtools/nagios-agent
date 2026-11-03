@@ -41,8 +41,9 @@ if ! live=$($SEMANAGE export 2>/dev/null) || [ -z "$live" ]; then
   exit 0
 fi
 
-# "boolean -m -1 virt_use_nfs" -> "boolean virt_use_nfs"; "-D" lines carry no name.
-names() { awk '$2 != "-D" { print $1, $NF }' | tr -d "'" | sort -u; }
+# "boolean -m -1 virt_use_nfs" -> "boolean virt_use_nfs". "-D" lines carry no
+# name, and blank lines (an empty side's printf) are not settings.
+names() { awk 'NF && $2 != "-D" { print $1, $NF }' | tr -d "'" | sort -u; }
 
 live_sorted=$(printf '%s\n' "$live" | sort -u)
 file_sorted=$(sort -u "$FILE")
