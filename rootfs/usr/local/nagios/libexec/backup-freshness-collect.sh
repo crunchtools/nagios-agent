@@ -113,7 +113,8 @@ collect_personal() {
 
 # label|rotation|min_bytes|mode|path
 #   mode=file : path is the exact dump file
-#   mode=dir  : newest *.db / *.sqlite* under path (recursive); ties go to the largest
+#   mode=dir  : newest *.db / *.sqlite* under path (recursive), skipping SQLite's
+#               -wal/-shm/-journal sidecars; ties go to the largest
 # Weekly-1 holds one dump (or data dir) per service. Monthly-1/2 alternate
 # months and are proxied by two representative dumps each. The .sql dumps never
 # exist on the host's disk: pbs writes them inside its container and copies them
@@ -146,8 +147,13 @@ lsf() { # <mode> <path> <secs>: rclone alone, so its exit code reaches the calle
         timeout "$3" "$RCLONE" --config "$CONF" lsf --files-only \
             --format ts --separator '|' "$BASE/$2"
     else
+        # SQLite's -wal/-shm/-journal sidecars are touched on every open, so
+        # they are usually the newest match, and a 32K -shm judged as the
+        # dump trips the size floor. --filter, not --exclude plus --include:
+        # rclone parses those two in no fixed order, and the includes won.
         timeout "$3" "$RCLONE" --config "$CONF" lsf -R --files-only \
-            --include '*.db' --include '*.sqlite*' \
+            --filter '- *-wal' --filter '- *-shm' --filter '- *-journal' \
+            --filter '+ *.db' --filter '+ *.sqlite*' --filter '- **' \
             --format ts --separator '|' "$BASE/$2"
     fi
 }

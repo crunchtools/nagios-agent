@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.3.2] - 2026-11-03
+
+### Fixed
+
+- Directory sentinels (`mode=dir`) picked the newest `*.sqlite*` file, which
+  is usually a `-shm` or `-wal` sidecar a live database touches on every open.
+  On gloval, takeda-db judged its 32K `openclaw.sqlite-shm` and failed the
+  50K floor while the database itself was fine. Those sidecars and `-journal`
+  files are now skipped.
+
 ## [7.3.1] - 2026-11-03
 
 ### Fixed
