@@ -40,8 +40,19 @@ if [[ "$PATH_URL" != /* ]] || [[ "$PATH_URL" == *@* ]]; then
     exit 3
 fi
 
-IP=$(curl -s --max-time 5 --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${CONTAINER}/json" 2>/dev/null \
-    | grep -oP '"IPAddress"\s*:\s*"\K[0-9.]+' | head -1)
+IPS=$(curl -s --max-time 5 --unix-socket "$SOCK" "http://localhost/v5.0.0/containers/${CONTAINER}/json" 2>/dev/null \
+    | grep -oP '"IPAddress"\s*:\s*"\K[0-9.]+')
+
+# A container also joined to an internal network has an address there that
+# the host has no route to: the lookup falls through to the default gateway
+# and the probe times out. Take the first address on a local bridge.
+IP=""
+for CANDIDATE in $IPS; do
+    if ! ip -4 route get "$CANDIDATE" 2>/dev/null | head -1 | grep -q " via "; then
+        IP="$CANDIDATE"
+        break
+    fi
+done
 
 # Only a refused connection (curl exit 7: nothing listening on the bridge
 # IP, i.e. a loopback-only port) earns the exec fallback. A timeout is a

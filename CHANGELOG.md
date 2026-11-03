@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.2.4] - 2026-11-03
+
+### Fixed
+
+- `check_container_httpd_internal.sh` probed the first address in the
+  container's JSON. A container also joined to an internal network (RT and
+  the wiki on gloval, RT #1546) listed an address the host cannot route to,
+  so the probe timed out and the check went CRITICAL. It now takes the first
+  address on a local bridge.
+
 ## [7.2.3] - 2026-11-03
 
 ### Changed
