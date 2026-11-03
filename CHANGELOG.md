@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.2.3] - 2026-11-03
+
+### Changed
+- Server deploy files follow the move from lotor to gloval (RT #1546): the
+  Nagios host is `gloval.dc4.crunchtools.com`, the gateway check pings
+  Hetzner's 88.198.7.193, and host metrics read `nvme0n1` and `enp6s0`.
+
+### Added
+- `deploy/nagios/lotor-mail.cfg`: lotor keeps `mail.crunchtools.com` until
+  Hetzner lifts gloval's outbound port 25. Nagios on gloval reaches lotor's
+  NRPE agents through the mail tunnel on 10.88.0.1:15666 and :15667.
+
 ## [7.2.2] - 2026-11-01
 
 ### Fixed
