@@ -1205,10 +1205,16 @@ lines' 'tab	with "quote"' 'back\slash'; do
     PE_BODY="$PESTUBS/body.json" PATH="$PESTUBS:$PATH" \
         "$LIBEXEC/podman_exec.sh" ctr sh -c "$arg" >/dev/null 2>&1
     label=$(printf '%s' "$arg" | tr '\n\t' '..' | head -c 20)
-    if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$PESTUBS/body.json" 2>/dev/null; then
-        echo "  PASS: request body is valid JSON for $label"; PASS=$((PASS + 1))
+    # Parsing is not enough: an escaper could emit valid JSON having dropped
+    # or altered the argument. Assert the decoded Cmd is exactly what went in.
+    printf '%s' "$arg" > "$PESTUBS/want.txt"
+    if python3 -c 'import json,sys
+body = json.load(open(sys.argv[1]))
+want = open(sys.argv[2]).read()
+assert body["Cmd"] == ["sh", "-c", want], body["Cmd"]' "$PESTUBS/body.json" "$PESTUBS/want.txt" 2>/dev/null; then
+        echo "  PASS: arguments survive the round trip for $label"; PASS=$((PASS + 1))
     else
-        echo "  FAIL: invalid JSON body for argument: $label"
+        echo "  FAIL: body invalid or arguments altered for: $label"
         cat "$PESTUBS/body.json"; FAIL=$((FAIL + 1))
     fi
 done
