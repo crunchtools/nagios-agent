@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `podman_exec.sh` built the exec request body by hand and escaped only
+  backslashes and quotes, so a literal newline or tab in an argument went
+  straight into the JSON string and made the body invalid. The API refused
+  the exec and the only symptom was `EXEC_ERROR: Cannot create exec in
+  container <name>`, which reads like a container problem rather than a
+  quoting one. Newlines and tabs are now escaped, with a test asserting the
+  body parses (RT #1548).
+- `check_container_opendkim.sh` sent its probe as a multi-line string and hit
+  exactly that, returning UNKNOWN against a healthy signer. The probe is one
+  line now, so the plugin does not depend on the fix above.
+
 ### Added
 
 - `check_container_opendkim.sh` watches the DKIM signing milter in the mail

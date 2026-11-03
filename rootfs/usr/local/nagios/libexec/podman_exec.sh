@@ -28,7 +28,28 @@ ATTACH=true; [ "$DETACH" -eq 1 ] && ATTACH=false
 
 CMD_JSON=""
 for arg in "$@"; do
-    arg=$(echo "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    # A literal newline or tab in an argument used to go straight into the
+    # JSON string, making the body invalid: the API refuses the exec and the
+    # only symptom is "Cannot create exec", which reads like a container
+    # problem rather than a quoting one. Found the hard way (RT#1548).
+    #
+    # JSON names an escape for backspace, formfeed, newline, return and tab;
+    # every other character below 0x20 would need \uXXXX, which sed cannot
+    # build. Those never appear in a check's arguments, so rather than emit a
+    # body that silently fails as "Cannot create exec", say so.
+    case "$arg" in
+        *[$'\001'-$'\007'$'\016'-$'\037']*)
+            echo "EXEC_ERROR: argument to $CONTAINER holds an unencodable control character" >&2
+            exit 3
+            ;;
+    esac
+
+    # -z treats the input as one NUL-terminated record, so an embedded
+    # newline is just another character to substitute. The obvious
+    # alternative, ':a;N;$!ba', silently skips every later expression on
+    # single-line input, because N at end of input prints and exits.
+    # Backslash goes first, or we double-escape the ones we just added.
+    arg=$(printf '%s' "$arg" | sed -z 's/\\/\\\\/g; s/"/\\"/g; s/\x08/\\b/g; s/\x0c/\\f/g; s/\t/\\t/g; s/\r/\\r/g; s/\n/\\n/g')
     CMD_JSON="${CMD_JSON}\"${arg}\","
 done
 CMD_JSON="${CMD_JSON%,}"
