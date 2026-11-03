@@ -254,6 +254,7 @@ cat > "$BSTUBS/rclone" <<'STUB'
 #!/bin/bash
 p="${!#}"
 echo "$p" >> "$STUB_CALLS"
+echo "$*" >> "${STUB_ARGS:-/dev/null}"
 hit() { [ -n "$1" ] && [[ "$p" == *"$1"* ]]; }
 hit "${STUB_SLOW:-}" && exec sleep 30
 hit "${STUB_FAIL:-}" && { echo "Failed to lsf: pcloud said no" >&2; exit "${STUB_FAIL_RC:-1}"; }
@@ -290,6 +291,11 @@ within 4 "exhausted deadline does not overrun"
 rm -f "$BSTAT"; : > "$STUB_CALLS"; HOST_FQDN=gloval.test RCLONE="$BSTUBS/rclone" CONF=/dev/null "$COL" servers
 if [ "$(grep -c '^pcloud:Backups/Servers/gloval.test/' "$STUB_CALLS")" = 19 ]; then echo "  PASS: every listing is under the host's own FQDN"; PASS=$((PASS + 1))
 else echo "  FAIL: listings not under HOST_FQDN: $(grep -v '^pcloud:Backups/Servers/gloval.test/' "$STUB_CALLS" | head -1)"; FAIL=$((FAIL + 1)); fi
+# A live SQLite's -shm/-wal is its newest file; directory sentinels must skip them.
+STUB_ARGS="$BSTUBS/args"; export STUB_ARGS; : > "$STUB_ARGS"; rm -f "$BSTAT"; scol; unset STUB_ARGS
+if grep 'takeda.crunchtools.com/data$' "$BSTUBS/args" | grep -qF -- "--filter - *-wal --filter - *-shm --filter - *-journal --filter + *.db --filter + *.sqlite* --filter - **"; then
+    echo "  PASS: directory sentinels filter out SQLite sidecars before *.db, in order"; PASS=$((PASS + 1))
+else echo "  FAIL: directory sentinel filters: $(grep 'takeda' "$BSTUBS/args" | head -1)"; FAIL=$((FAIL + 1)); fi
 # The live-read failure this release exists for: a slow listing after a good run.
 rm -f "$BSTAT"; scol
 STUB_SLOW=crunchtools.com/backups PROBE_T=1 BUDGET=6 scol
