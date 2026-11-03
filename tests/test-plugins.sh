@@ -20,8 +20,19 @@ cat > "$STUBS/curl" <<'STUB'
 for a in "$@"; do
     if [ "$a" = "--unix-socket" ]; then printf '%s' "${STUB_SOCK:-}"; exit "${STUB_SOCK_RC:-0}"; fi
 done
+printf '%s' "${@: -1}" > "$STUB_DIRECT_URL"
 printf '%s' "${STUB_DIRECT:-}"
 exit "${STUB_DIRECT_RC:-0}"
+STUB
+# ip stub: "route get <addr>" answers via a gateway for the addresses listed
+# in STUB_ROUTED_VIA (no host route), on a local bridge for any other.
+cat > "$STUBS/ip" <<'STUB'
+#!/bin/bash
+addr="${*: -1}"
+case " ${STUB_ROUTED_VIA:-} " in
+    *" $addr "*) echo "$addr via 192.0.2.1 dev eth0 src 192.0.2.10 uid 0" ;;
+    *) echo "$addr dev podman0 src 10.88.0.1 uid 0" ;;
+esac
 STUB
 cat > "$STUBS/podman_exec.sh" <<'STUB'
 #!/bin/bash
@@ -29,8 +40,8 @@ touch "$STUB_EXEC_MARK"
 printf '%s' "${STUB_EXEC:-}"
 exit "${STUB_EXEC_RC:-0}"
 STUB
-chmod +x "$STUBS/curl" "$STUBS/podman_exec.sh"
-export PATH="$STUBS:$PATH" PODMAN_EXEC="$STUBS/podman_exec.sh" STUB_EXEC_MARK="$STUBS/exec-ran"
+chmod +x "$STUBS/curl" "$STUBS/podman_exec.sh" "$STUBS/ip"
+export PATH="$STUBS:$PATH" PODMAN_EXEC="$STUBS/podman_exec.sh" STUB_EXEC_MARK="$STUBS/exec-ran" STUB_DIRECT_URL="$STUBS/direct-url"
 
 # expect <desc> <rc> <output-regex> <exec: yes|no|any> -- <plugin> <args...>
 expect() {
@@ -80,6 +91,10 @@ STUB_SOCK='{"NetworkSettings":{"IPAddress":""}}' STUB_EXEC="301 0.01" \
     expect "no bridge IP uses exec" 0 "OK .*301" yes -- "$HTTP" ctr 80 /
 STUB_SOCK='{"NetworkSettings":{"IPAddress":""}}' STUB_EXEC_RC=7 \
     expect "exec fallback failure is CRITICAL" 2 "CRITICAL .*unreachable" yes -- "$HTTP" ctr 80 /
+MULTI='{"NetworkSettings":{"IPAddress":"","Networks":{"crunchtools-rt":{"IPAddress":"10.89.20.2"},"podman":{"IPAddress":"10.88.0.14"}}}}'
+STUB_SOCK="$MULTI" STUB_ROUTED_VIA="10.89.20.2" STUB_DIRECT="200 0.01" \
+    expect "internal-network address is skipped" 0 "OK .*200" no -- "$HTTP" ctr 80 /
+ok_if "probe used the bridge address" grep -q "^http://10.88.0.14:80/$" "$STUB_DIRECT_URL"
 STUB_SOCK="$IPJSON" STUB_DIRECT="500 0.01" expect "unexpected code is CRITICAL" 2 "CRITICAL .*unexpected 500" no -- "$HTTP" ctr 80 /
 expect "port with @ rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr '80@1.1.1.1' /
 expect "port out of range rejected" 3 "UNKNOWN - invalid port" no -- "$HTTP" ctr 70000 /
