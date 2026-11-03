@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.3.1] - 2026-11-03
+
+### Fixed
+
+- `backup-freshness-collect.sh` read `pcloud:Backups/Servers/lotor.dc3.crunchtools.com`
+  whatever host it ran on, so after the cutover gloval's Backup Freshness
+  judged lotor's frozen rotations and went CRITICAL while gloval's own backup
+  was fine. The path now comes from the host's FQDN (`HOST_FQDN`, default the
+  kernel hostname); `BASE` still overrides it (RT #1546).
+
 ## [7.3.0] - 2026-11-03
 
 ### Added
