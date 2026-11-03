@@ -1201,16 +1201,18 @@ printf '%s' '{"Id":"deadbeef"}'
 STUB
 chmod +x "$PESTUBS/curl"
 for arg in 'plain' 'two
-lines' 'tab	with "quote"' 'back\slash'; do
+lines' 'tab	with "quote"' 'back\slash' "$(printf 'carriage\rreturn')" "$(printf 'back\bspace form\ffeed')"; do
     PE_BODY="$PESTUBS/body.json" PATH="$PESTUBS:$PATH" \
         "$LIBEXEC/podman_exec.sh" ctr sh -c "$arg" >/dev/null 2>&1
     label=$(printf '%s' "$arg" | tr '\n\t' '..' | head -c 20)
     # Parsing is not enough: an escaper could emit valid JSON having dropped
     # or altered the argument. Assert the decoded Cmd is exactly what went in.
     printf '%s' "$arg" > "$PESTUBS/want.txt"
+    # newline="" or python translates a lone CR in the expected value to LF
+    # and the comparison fails against a correctly escaped body.
     if python3 -c 'import json,sys
 body = json.load(open(sys.argv[1]))
-want = open(sys.argv[2]).read()
+want = open(sys.argv[2], newline="").read()
 assert body["Cmd"] == ["sh", "-c", want], body["Cmd"]' "$PESTUBS/body.json" "$PESTUBS/want.txt" 2>/dev/null; then
         echo "  PASS: arguments survive the round trip for $label"; PASS=$((PASS + 1))
     else
@@ -1218,6 +1220,15 @@ assert body["Cmd"] == ["sh", "-c", want], body["Cmd"]' "$PESTUBS/body.json" "$PE
         cat "$PESTUBS/body.json"; FAIL=$((FAIL + 1))
     fi
 done
+# A control character JSON cannot name is refused with a message that says
+# so, rather than building a body the API rejects as "Cannot create exec".
+pe_out=$(PE_BODY="$PESTUBS/body.json" PATH="$PESTUBS:$PATH" \
+    "$LIBEXEC/podman_exec.sh" ctr sh -c "$(printf 'bell\007here')" 2>&1); pe_rc=$?
+if [ "$pe_rc" = "3" ] && printf '%s' "$pe_out" | grep -q 'unencodable control character'; then
+    echo "  PASS: an unencodable control character is refused, not mangled"; PASS=$((PASS + 1))
+else
+    echo "  FAIL: expected rc=3 and an unencodable-control message, got rc=$pe_rc: $pe_out"; FAIL=$((FAIL + 1))
+fi
 rm -rf "$PESTUBS"
 
 echo "=== check_container_opendkim ==="
