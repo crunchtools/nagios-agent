@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_container_opendkim.sh` watches the DKIM signing milter in the mail
+  relay. The relay runs with `milter_default_action = accept`, so a dead
+  signer does not stop mail, it sends it unsigned — postfix logs a successful
+  delivery either way and the first sign of trouble would be our mail landing
+  in spam weeks later. CRITICAL when the signer is gone or when it is up but
+  not accepting connections on 127.0.0.1:8891, since the second fails exactly
+  as silently as the first. Both probes run in one exec. Registered as
+  `check_opendkim_mail` in the container pool (RT #1548).
+
 ### Changed
 
 - `deploy/nagios/registry-drift.cfg` attaches the check to gloval, where it
