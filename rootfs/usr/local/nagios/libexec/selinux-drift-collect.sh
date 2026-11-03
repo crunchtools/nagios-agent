@@ -44,8 +44,10 @@ fi
 # "boolean -m -1 virt_use_nfs" -> "boolean virt_use_nfs"; "-D" lines carry no name.
 names() { awk '$2 != "-D" { print $1, $NF }' | tr -d "'" | sort -u; }
 
-only_live=$(comm -23 <(printf '%s\n' "$live" | sort -u) <(sort -u "$FILE") | names)
-only_file=$(comm -13 <(printf '%s\n' "$live" | sort -u) <(sort -u "$FILE") | names)
+live_sorted=$(printf '%s\n' "$live" | sort -u)
+file_sorted=$(sort -u "$FILE")
+only_live=$(comm -23 <(printf '%s\n' "$live_sorted") <(printf '%s\n' "$file_sorted") | names)
+only_file=$(comm -13 <(printf '%s\n' "$live_sorted") <(printf '%s\n' "$file_sorted") | names)
 
 count() { [ -n "$1" ] && printf '%s\n' "$1" | wc -l || echo 0; }
 
