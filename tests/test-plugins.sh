@@ -455,6 +455,37 @@ expect "missing args is UNKNOWN" 3 "^UNKNOWN - usage" any -- ou d.socket
 expect "bad unit name rejected" 3 "^UNKNOWN - invalid unit" any -- ou 'x;rm.socket' d.service
 rm -rf "$OSTUBS"
 
+echo "=== check_service_running ==="
+# systemctl stub: is-system-running prints $STUB_SYSTEM; show prints the four
+# properties from $STUB_ACTIVE / $STUB_SUB / $STUB_RESTARTS.
+RSTUBS="$(mktemp -d)"
+cat > "$RSTUBS/systemctl" <<'STUB'
+#!/bin/bash
+case "$1" in
+    is-system-running) echo "${STUB_SYSTEM-running}"; exit 0 ;;
+    show)
+        [ -n "${STUB_ACTIVE-x}" ] || exit 0
+        echo "ActiveState=${STUB_ACTIVE-active}"
+        echo "SubState=${STUB_SUB-running}"
+        echo "NRestarts=${STUB_RESTARTS-3}"
+        echo "ActiveEnterTimestamp=Wed 2026-11-04 12:33:57 EST" ;;
+esac
+STUB
+chmod +x "$RSTUBS/systemctl"
+SR="$LIBEXEC/check_service_running.sh"
+sr() { PATH="$RSTUBS:$PATH" "$SR" "$@"; }
+expect "running is OK" 0 "^OK - r.service running since .*3 restarts \| restarts=3$" any -- sr r.service
+STUB_ACTIVE=activating STUB_SUB=start expect "starting is WARNING" 1 "^WARNING - r.service is activating \(start\)" any -- sr r.service
+STUB_ACTIVE=activating STUB_SUB=auto-restart STUB_RESTARTS=40 expect "restart loop is CRITICAL" 2 "^CRITICAL - r.service is activating \(auto-restart\), 40 restarts" any -- sr r.service
+STUB_ACTIVE=failed STUB_SUB=failed expect "failed is CRITICAL" 2 "^CRITICAL - r.service is failed" any -- sr r.service
+STUB_ACTIVE=inactive STUB_SUB=dead expect "stopped is CRITICAL" 2 "^CRITICAL - r.service is inactive" any -- sr r.service
+STUB_SYSTEM=offline expect "no host systemd is UNKNOWN" 3 "^UNKNOWN .*no reachable system manager" any -- sr r.service
+STUB_ACTIVE="" expect "unreadable state is UNKNOWN" 3 "^UNKNOWN - cannot read state of r.service" any -- sr r.service
+expect "missing arg is UNKNOWN" 3 "^UNKNOWN - usage" any -- sr
+expect "bad unit name rejected" 3 "^UNKNOWN - invalid unit" any -- sr 'x;rm.service'
+expect "non-service unit rejected" 3 "^UNKNOWN - invalid unit" any -- sr r.socket
+rm -rf "$RSTUBS"
+
 echo "=== check_container_memory ==="
 CM="$LIBEXEC/check_container_memory.sh"
 NOTFOUND='{"cause":"no such container","message":"no container with name or ID \"x\" found","response":404}'

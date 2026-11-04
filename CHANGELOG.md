@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `check_service_running.sh <unit>`: a long-running service that restarts
+  itself. With `Restart=always` a broken service loops instead of failing, so
+  `check_systemd_units.sh` stays green; this is CRITICAL on auto-restart,
+  failed or stopped, WARNING while starting, and reports `NRestarts`. Wired as
+  `check_gha_runner_cached` / `check_gha_runner_uncached` for the two GitHub
+  Actions runners on gloval (`deploy/nagios/gha-runner.cfg`), with retries that
+  absorb a one-job runner's restart between jobs.
+
 ### Fixed
 
 - `podman_exec.sh` built the exec request body by hand and escaped only
