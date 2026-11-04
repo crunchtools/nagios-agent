@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import sqlite3
-import sys
 import tempfile
 import time
 import unittest
@@ -247,4 +246,7 @@ class Context(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    sys.exit(unittest.main())
+    # unittest.main() exits by itself. Wrapping it in an exit call handed
+    # that call a TestProgram, which mypy caught the moment this repo got a
+    # type checker. Removing the wrapper also made the sys import unused.
+    unittest.main()

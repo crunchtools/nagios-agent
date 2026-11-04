@@ -1,0 +1,37 @@
+# The one CI job: every check this repo runs, from python-sdlc at the release
+# .pre-commit-config.yaml pins -- the same image and the same commands the
+# laptop runs, so a green push predicts a green CI (constitution XII, v1.30.0).
+#
+# The job NAME `sdlc ci` is the required check in the org ruleset "Python SDLC
+# gates". Renaming the job stops it gating, silently.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdlc:
+    name: sdlc ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The release is read from .pre-commit-config.yaml, so one line pins the
+      # launcher, the image and every tool in it, for the laptop and CI both.
+      - name: sdlc ci
+        run: |
+          set -eu
+          rev=$(awk '/repo: https:\/\/github.com\/crunchtools\/python-sdlc/ {f=1; next}
+                     f && /rev:/ {print $2; exit}' .pre-commit-config.yaml)
+          [ -n "$rev" ] || { echo "no python-sdlc rev in .pre-commit-config.yaml" >&2; exit 2; }
+          git clone -q --depth 1 --branch "$rev" https://github.com/crunchtools/python-sdlc "$RUNNER_TEMP/sdlc"
+          $RUNNER_TEMP/sdlc/bin/sdlc ci

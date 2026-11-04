@@ -3,6 +3,23 @@
 # Not a Python package: the plugins are single files run by NRPE, and the
 # Hermes probes are sent alone into the Kagetora container, so they import
 # nothing outside the standard library.
+#
+# The [project] table below exists only so `uv lock` can pin the gate's own
+# tools; `package = false` keeps uv from trying to build or install this repo.
+[project]
+name = "nagios-agent"
+version = "0"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.uv]
+package = false
+
+# mypy and pytest must be IN the lockfile or the gate exits 2 rather than
+# pretending to pass (python-sdlc, need_lock_dep).
+[dependency-groups]
+dev = ["mypy>=1.14", "pytest>=8.3"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -16,3 +33,14 @@ max-statements = 50
 
 [tool.ruff.lint.mccabe]
 max-complexity = 12
+
+# The probes and their tests. They are loose files, not a package, so mypy is
+# pointed at them by path.
+[tool.mypy]
+files = ["rootfs/usr/local/nagios/libexec", "tests"]
+python_version = "3.10"
+
+[tool.sdlc.push]
+# No in-repo Semgrep rules: the gate exits 2 when .semgrep is absent rather
+# than scanning nothing and reporting a pass. CodeQL still runs.
+skip = ["semgrep"]
