@@ -476,3 +476,9 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/selinux-drift-collect.sh"
 justification = "Not an NRPE plugin: the root half of check_selinux_drift.sh's privilege split, run through podman_exec.sh like srv-drift-collect.sh, so it ships beside the plugin at the libexec path it invokes."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_service_running.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
