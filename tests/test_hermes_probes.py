@@ -246,7 +246,4 @@ class Context(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # unittest.main() exits by itself. Wrapping it in an exit call handed
-    # that call a TestProgram, which mypy caught the moment this repo got a
-    # type checker. Removing the wrapper also made the sys import unused.
     unittest.main()

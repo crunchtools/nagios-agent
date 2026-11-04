@@ -482,3 +482,14 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_service_running.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
+
+# Ruff is not missing; it moved. Gourmand's IF001 looks for a literal
+# `ruff-check` hook id, and under python-sdlc (constitution XII, v1.30.0) ruff
+# runs inside the `sdlc-commit` hook, configured by [tool.ruff] in
+# pyproject.toml. Same precedent as trentina.
+[[exceptions]]
+check = "linter_configuration"
+path = ".pre-commit-config.yaml"
+pattern = "ruff-check"
+justification = "ruff runs inside the sdlc-commit hook from python-sdlc (constitution XII v1.30.0), configured by [tool.ruff] in pyproject.toml; Gourmand looks for a literal ruff hook id"
+classification = "by_design"
