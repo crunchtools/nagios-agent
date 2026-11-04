@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import sqlite3
-import sys
 import tempfile
 import time
 import unittest
@@ -247,4 +246,4 @@ class Context(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    sys.exit(unittest.main())
+    unittest.main()
