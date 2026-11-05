@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [7.4.0] - 2026-11-04
+
 ### Added
 
 - `check_service_running.sh <unit>`: a long-running service that restarts
@@ -15,6 +17,14 @@ All notable changes to this project are documented here. The format follows
   `check_gha_runner_cached` / `check_gha_runner_uncached` for the two GitHub
   Actions runners on gloval (`deploy/nagios/gha-runner.cfg`), with retries that
   absorb a one-job runner's restart between jobs.
+- `check_container_opendkim.sh` watches the DKIM signing milter in the mail
+  relay. The relay runs with `milter_default_action = accept`, so a dead
+  signer does not stop mail, it sends it unsigned — postfix logs a successful
+  delivery either way and the first sign of trouble would be our mail landing
+  in spam weeks later. CRITICAL when the signer is gone or when it is up but
+  not accepting connections on 127.0.0.1:8891, since the second fails exactly
+  as silently as the first. Both probes run in one exec. Registered as
+  `check_opendkim_mail` in the container pool (RT #1548).
 
 ### Fixed
 
@@ -29,21 +39,12 @@ All notable changes to this project are documented here. The format follows
   exactly that, returning UNKNOWN against a healthy signer. The probe is one
   line now, so the plugin does not depend on the fix above.
 
-### Added
-
-- `check_container_opendkim.sh` watches the DKIM signing milter in the mail
-  relay. The relay runs with `milter_default_action = accept`, so a dead
-  signer does not stop mail, it sends it unsigned — postfix logs a successful
-  delivery either way and the first sign of trouble would be our mail landing
-  in spam weeks later. CRITICAL when the signer is gone or when it is up but
-  not accepting connections on 127.0.0.1:8891, since the second fails exactly
-  as silently as the first. Both probes run in one exec. Registered as
-  `check_opendkim_mail` in the container pool (RT #1548).
-
 ### Changed
 
 - `deploy/nagios/registry-drift.cfg` attaches the check to gloval, where it
   is deployed since the lotor cutover (RT #1546).
+- Every check now runs through python-sdlc (constitution v1.30.0), kept
+  current at v0.3.7.
 
 ## [7.3.2] - 2026-11-03
 
