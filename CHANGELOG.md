@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.0.0] - 2026-11-04
+
+### Changed
+
+- **BREAKING**: `check_ping_cloudflare` verdict thresholds raised from
+  `-w 5.0,20% -c 50.0,60%` to `-w 25.0,20% -c 100.0,60%`. The warning sat
+  exactly on the normal latency: measured baseline from gloval to 8.8.8.8 is
+  min/avg/max 4.948/5.018/5.489ms with mdev 0.130 over 20 packets, so the check
+  warned essentially always — 912 alerts since 2026-08-23, every one reporting
+  0% packet loss. A monitor that is always yellow trains you to ignore it.
+  Warning is now 5x normal, which still catches real degradation. Packet loss
+  thresholds are unchanged at 20%/60%. MAJOR per the constitution, which
+  requires it for any change to an existing check's verdict thresholds.
+
 ## [7.4.0] - 2026-11-04
 
 ### Added
