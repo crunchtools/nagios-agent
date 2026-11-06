@@ -108,6 +108,10 @@ STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
     expect "a hostname is UNKNOWN, not a false OK" 3 "UNKNOWN .*not an IPv4" any -- "$AE" ctr gateway.internal:8021
 STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/missing" \
     expect "an unreadable net/tcp is UNKNOWN" 3 "UNKNOWN .*cannot read" any -- "$AE" ctr 10.89.15.2:8021
+STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
+    expect "a zero-padded port is not read as octal" 0 "OK .*1 connection" any -- "$AE" ctr 10.89.15.2:08021
+STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
+    expect "zero-padded octets are not read as octal" 0 "OK .*1 connection" any -- "$AE" ctr 010.089.015.002:8021
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$AE" '../../x#' 10.89.15.2:8021
 
 echo "=== check_container_httpd_internal ==="

@@ -104,7 +104,12 @@ while IFS= read -r line; do
         UNMANAGED) unmanaged="$unmanaged $name" ;;
         UNKNOWN)   unknown="$unknown $name" ;;
     esac
-done < <(grep '^DDRIFT item=' <<< "$CL_RAW" | sort -t= -k5)
+# `-t '='`, not `-t=`: GNU sort reads the fused form as the separator '=',
+# and uutils sort -- which is what coreutils is on ubuntu-26.04 runners since
+# the 20261101 image -- reads it as an empty separator and refuses with
+# "separator must be exactly one character long: ''". Thirteen tests failed
+# on that alone, in a build whose diff was somewhere else entirely (RT#1558).
+done < <(grep '^DDRIFT item=' <<< "$CL_RAW" | sort -t '=' -k5)
 
 n_unmanaged=$(printf '%s' "$unmanaged" | wc -w)
 n_stale=$(printf '%s' "$stale" | wc -w)

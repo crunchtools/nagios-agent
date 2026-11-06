@@ -39,7 +39,8 @@ STRIPPED="${STRIPPED%%/*}"
 HOST="${STRIPPED%%:*}"
 PORT="${STRIPPED##*:}"
 
-if [ "$PORT" = "$HOST" ] || ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+if [ "$PORT" = "$HOST" ] || ! [[ "$PORT" =~ ^[0-9]+$ ]] ||
+   [ "$((10#$PORT))" -lt 1 ] || [ "$((10#$PORT))" -gt 65535 ]; then
     echo "UNKNOWN - '$ENDPOINT' has no usable port"
     exit 3
 fi
@@ -52,12 +53,17 @@ OCT_B="${BASH_REMATCH[2]}"
 OCT_C="${BASH_REMATCH[3]}"
 OCT_D="${BASH_REMATCH[4]}"
 for octet in "$OCT_A" "$OCT_B" "$OCT_C" "$OCT_D"; do
-    if [ "$octet" -gt 255 ]; then
+    if [ "$((10#$octet))" -gt 255 ]; then
         echo "UNKNOWN - '$ENDPOINT' has an octet above 255"
         exit 3
     fi
 done
-TARGET=$(printf '%02X%02X%02X%02X:%04X' "$OCT_D" "$OCT_C" "$OCT_B" "$OCT_A" "$PORT")
+# 10# forces base ten. Without it bash reads a zero-padded value as octal, so
+# a port written 08021 is an "invalid octal number" and an octet written 010
+# silently becomes 8 -- either way the target cannot match and a live
+# connection reads as dead.
+TARGET=$(printf '%02X%02X%02X%02X:%04X' \
+    "$((10#$OCT_D))" "$((10#$OCT_C))" "$((10#$OCT_B))" "$((10#$OCT_A))" "$((10#$PORT))")
 
 SOCK="/run/podman/podman.sock"
 RAW=$(curl -sS --max-time 10 --unix-socket "$SOCK" \
