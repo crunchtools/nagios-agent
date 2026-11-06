@@ -58,7 +58,11 @@ started_at() {
         return 2
     fi
     if ! printf '%s' "$raw" | grep -q '"StartedAt"'; then
-        printf '%s' "$raw" | grep -oP '"message"\s*:\s*"\K[^"]+' >&2
+        # The message contains escaped quotes around the container name, so
+        # [^"]+ stops at the first one and truncates the reason to "no
+        # container with name or ID \". Match a JSON string properly.
+        printf '%s' "$raw" | grep -oP '"message"\s*:\s*"\K(?:[^"\\]|\\.)*' |
+            sed -E 's/\\"/"/g; s/\\\\/\\/g' >&2
         return 1
     fi
     # Running is positive proof: a stopped container has a StartedAt too, and

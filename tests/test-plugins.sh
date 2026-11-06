@@ -124,7 +124,7 @@ STUB_SOCK="$(started 300)" \
     STUB_SOCK_ALT='{"cause":"no such container","message":"no container with name or ID \"trentina\" found","response":404}' \
     expect "a missing gateway is UNKNOWN" 3 "UNKNOWN .*no container" any -- "$GS" agent trentina 900
 STUB_SOCK='{"cause":"no such container","message":"no container with name or ID \"agent\" found","response":404}' \
-    expect "a missing agent is CRITICAL" 2 "CRITICAL .*no container" any -- "$GS" agent trentina 900
+    expect "a missing agent is CRITICAL, with the whole reason" 2 'CRITICAL .*no container with name or ID "agent" found' any -- "$GS" agent trentina 900
 STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$GS" agent trentina 900
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$GS" '../../x#' trentina 900
 expect "a non-numeric grace is rejected" 3 "UNKNOWN - grace" any -- "$GS" agent trentina abc
