@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.1.0] - 2026-11-06
+
+### Added
+
+- `check_agent_egress.sh`: an agent container that holds no connection to its
+  gateway's client egress is CRITICAL. On 2026-11-05 josui.crunchtools.com ran
+  for nineteen hours with a live `claude remote-control` holding zero sockets
+  after the gateway restarted — container up, process up, unit happy, agent
+  gone from the operator's session list, and nothing watching the one thing
+  that would have said so. It reads the container's own
+  `/proc/<pid>/net/tcp` through `--pid=host` rather than exec'ing into it, and
+  it is UNKNOWN rather than OK whenever it cannot tell. RT#1556.
+
 ## [8.0.0] - 2026-11-04
 
 ### Changed

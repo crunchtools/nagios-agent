@@ -28,15 +28,22 @@ daemon is the sole witness to its own death.
    restarts, all via the podman socket the agent already has.
    `check_container_running.sh`, `check_container_memory.sh`,
    `check_container_restart.sh`.
-3. **Supply chain** — Quay tag staleness and whether an image is being pulled
+3. **An agent that is alive and unreachable** — an agent container holds a
+   connection out through its gateway, or it is gone from its operator's
+   session list with nothing to show for it. `check_agent_egress.sh` reads the
+   container's own `/proc/<pid>/net/tcp` (this agent runs `--pid=host`, so no
+   exec is needed) and counts ESTABLISHED connections to the gateway's client
+   egress. On 2026-11-05 josui.crunchtools.com ran nineteen hours that way:
+   container up, process up, unit happy, zero sockets.
+4. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
    `check_quay_pull_source.sh`. Whether every image's newest release reached
    Quay and GHCR, `check_registry_drift.sh`.
-4. **Credential liveness** — Google OAuth grants tested by asking the backend
+5. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
    credential. `check_google_oauth.sh`. Postiz channel tokens, read from its
    own database, `check_postiz_tokens.sh`.
-5. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
+6. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
    and incidents on the components we use, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_cloudflare_global.sh`,
@@ -44,7 +51,7 @@ daemon is the sole witness to its own death.
    mounted and still answers a listing (`check_fuse_mount.sh`), a SQLite
    index that is not empty (`check_sqlite_rows.sh`), and mcp-trove's last
    nightly index run, from its JSON summary (`check_trove_run.sh`).
-6. **Backup freshness** — the weekly pCloud dumps by age and size floor
+7. **Backup freshness** — the weekly pCloud dumps by age and size floor
    (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
    `crunchtools/pbs` writes after each sync
    (`check_personal_backup_freshness.sh`), both judged from a status file that
@@ -54,7 +61,7 @@ daemon is the sole witness to its own death.
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service
    writes its dump `0600`.
-7. **Outside calls off the hot path** — the checks in the table below make no
+8. **Outside calls off the hot path** — the checks in the table below make no
    outside call inside NRPE's timeout (constitution XVI). A collector does the reads with a
    generous budget and a timeout per item, keeps an item's last good answer
    through a failed read, and writes a status file atomically to
@@ -72,7 +79,7 @@ daemon is the sole witness to its own death.
    | `deploy-drift-collect.sh` | Deploy drift | 30m / 3h |
    | `config-drift-repos-collect.sh` | Config drift cross-repo | 30m / 3h |
    | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
-8. **Configuration drift, three doors** — `/srv` against its own git
+9. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
    repo that also carries it (`check_config_drift.sh`). The third exists
