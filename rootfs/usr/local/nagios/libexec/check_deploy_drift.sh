@@ -29,6 +29,11 @@
 # jobs that pull the image themselves with --pull=newer, and the autoupdate
 # label would let auto-update restart one mid-backup.
 #
+# quay.io/crunchtools/developer is ignored for the same kind of reason: the
+# developer seats carry no autoupdate label on purpose, because an agent in one
+# runs jobs that take hours and a 03:00 restart destroys the work. A release
+# lands there when a seat is restarted deliberately, between jobs.
+#
 # GRACE_HOURS defaults to 30. podman-auto-update.timer fires once a day at
 # 03:00 ET (the maintenance-window drop-in), so a tag pushed at 03:01
 # legitimately waits ~24h. Anything older than that missed a run.
