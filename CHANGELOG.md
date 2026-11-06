@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.2.0] - 2026-11-06
+
+### Changed
+
+- `check_agent_egress.sh` is replaced by `check_agent_gateway_stale.sh`. The
+  first one counted ESTABLISHED connections from an agent container to its
+  gateway's client egress and called zero CRITICAL. That is the wrong signal:
+  Claude Code's Remote Control polls — a connection roughly every thirty to
+  two hundred seconds, gone in about a second — so a healthy idle agent has
+  none at almost any instant. Measured on gloval 2026-11-06: one hit in ten
+  samples over two minutes, and a CRITICAL for a Josui Prime that was polling
+  normally.
+- The replacement watches the failure that is real, documented and silent:
+  when the gateway restarts, every client's session dies with it and the agent
+  keeps running with no tools. Comparing the two containers' start times says
+  so exactly, with no sampling to race against and a grace (900s) so a
+  deliberate gateway-then-agents restart does not page while it runs. RT#1556.
+
+### Fixed
+
+- `check_deploy_drift.sh` used `sort -t=`, which uutils reads as an empty
+  separator; 13 tests failed on it the first time CI ran on an ubuntu-26.04
+  runner. `sort -t '='` is right for both implementations. RT#1558.
+- The plugin test harness can answer two different socket URLs in one run
+  (`STUB_SOCK_TOKEN`, `STUB_SOCK_ALT`), which a plugin that inspects two
+  containers needs.
+
 ## [8.1.0] - 2026-11-06
 
 ### Added

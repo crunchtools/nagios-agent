@@ -28,13 +28,15 @@ daemon is the sole witness to its own death.
    restarts, all via the podman socket the agent already has.
    `check_container_running.sh`, `check_container_memory.sh`,
    `check_container_restart.sh`.
-3. **An agent that is alive and unreachable** — an agent container holds a
-   connection out through its gateway, or it is gone from its operator's
-   session list with nothing to show for it. `check_agent_egress.sh` reads the
-   container's own `/proc/<pid>/net/tcp` (this agent runs `--pid=host`, so no
-   exec is needed) and counts ESTABLISHED connections to the gateway's client
-   egress. On 2026-11-05 josui.crunchtools.com ran nineteen hours that way:
-   container up, process up, unit happy, zero sockets.
+3. **An agent that lost its gateway and does not know** — when the Trentina
+   gateway restarts, every client's session dies with it: the gateway logs
+   "client predates a gateway restart" and the agent carries on with no MCP
+   tools at all, looking perfectly healthy. `check_agent_gateway_stale.sh`
+   compares two start times and says so exactly, with a grace so a deliberate
+   restart sequence does not page. It replaced a check that counted
+   ESTABLISHED connections to the gateway: Claude Code's Remote Control polls
+   rather than holding a connection, so that one reported CRITICAL for a
+   healthy agent (one hit in ten samples over two minutes, measured).
 4. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
    `check_quay_pull_source.sh`. Whether every image's newest release reached

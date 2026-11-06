@@ -17,8 +17,19 @@ FAIL=0
 # return STUB_DIRECT (exit STUB_DIRECT_RC).
 cat > "$STUBS/curl" <<'STUB'
 #!/bin/bash
+# STUB_SOCK answers every socket call, unless STUB_SOCK_TOKEN is set and the
+# URL contains it, in which case STUB_SOCK_ALT answers instead. Two containers
+# inspected in one plugin need two answers.
 for a in "$@"; do
-    if [ "$a" = "--unix-socket" ]; then printf '%s' "${STUB_SOCK:-}"; exit "${STUB_SOCK_RC:-0}"; fi
+    if [ "$a" = "--unix-socket" ]; then
+        url="${@: -1}"
+        if [ -n "${STUB_SOCK_TOKEN:-}" ] && [ "${url#*$STUB_SOCK_TOKEN}" != "$url" ]; then
+            printf '%s' "${STUB_SOCK_ALT:-}"
+        else
+            printf '%s' "${STUB_SOCK:-}"
+        fi
+        exit "${STUB_SOCK_RC:-0}"
+    fi
 done
 printf '%s' "${@: -1}" > "$STUB_DIRECT_URL"
 printf '%s' "${STUB_DIRECT:-}"
@@ -80,39 +91,37 @@ STUB_SOCK='{"Processes":[],"Titles":["PID","COMMAND"]}' expect "empty table is U
 STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$PC" ctr php-fpm 1 1 X
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$PC" '../../x#' php-fpm 1 1 X
 
-echo "=== check_agent_egress ==="
-AE="$LIBEXEC/check_agent_egress.sh"
-RUNNING='{"State":{"Running":true,"Pid":4242}}'
-STOPPED='{"State":{"Running":false,"Pid":0}}'
-NT_HEAD='  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid'
-# 10.89.15.2:8021 is 020F590A:1F55; :8019 is 020F590A:1F53.
-printf '%s\n   0: 0100007F:A1B2 020F590A:1F55 01\n   1: 0100007F:A1B3 020F590A:1F53 01\n' \
-    "$NT_HEAD" > "$STUBS/net-tcp-up"
-printf '%s\n   0: 0100007F:A1B2 020F590A:1F53 01\n   1: 0100007F:A1B3 020F590A:1F55 06\n' \
-    "$NT_HEAD" > "$STUBS/net-tcp-down"
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "an established connection is OK" 0 "OK .*1 connection" any -- "$AE" ctr 10.89.15.2:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-down" \
-    expect "alive with no connection is CRITICAL" 2 "CRITICAL .*alive and unreachable" any -- "$AE" ctr 10.89.15.2:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "a proxy URL is accepted" 0 "OK .*1 connection" any -- "$AE" ctr http://10.89.15.2:8021
-STUB_SOCK="$STOPPED" expect "a stopped container is CRITICAL" 2 "CRITICAL .*not running" any -- "$AE" ctr 10.89.15.2:8021
-STUB_SOCK='{"cause":"no such container","message":"no container with name or ID \"x\" found","response":404}' \
-    expect "API error is CRITICAL, not OK" 2 "CRITICAL .*not running" any -- "$AE" x 10.89.15.2:8021
-STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$AE" ctr 10.89.15.2:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "an out-of-range port is UNKNOWN" 3 "UNKNOWN .*no usable port" any -- "$AE" ctr 10.89.15.2:65536
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "an out-of-range octet is UNKNOWN" 3 "UNKNOWN .*octet above 255" any -- "$AE" ctr 10.89.999.2:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "a hostname is UNKNOWN, not a false OK" 3 "UNKNOWN .*not an IPv4" any -- "$AE" ctr gateway.internal:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/missing" \
-    expect "an unreadable net/tcp is UNKNOWN" 3 "UNKNOWN .*cannot read" any -- "$AE" ctr 10.89.15.2:8021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "a zero-padded port is not read as octal" 0 "OK .*1 connection" any -- "$AE" ctr 10.89.15.2:08021
-STUB_SOCK="$RUNNING" STUB_NET_TCP="$STUBS/net-tcp-up" \
-    expect "zero-padded octets are not read as octal" 0 "OK .*1 connection" any -- "$AE" ctr 010.089.015.002:8021
-expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$AE" '../../x#' 10.89.15.2:8021
+echo "=== check_agent_gateway_stale ==="
+GS="$LIBEXEC/check_agent_gateway_stale.sh"
+# Times are built with the same `date` the plugin parses with, so the pair
+# agrees whichever coreutils is installed (ubuntu-26.04 runners ship uutils).
+iso_ago() { date -u -d "@$(( $(date +%s) - $1 ))" +%Y-%m-%dT%H:%M:%S.000000000Z; }
+started() { printf '{"State":{"Running":true,"StartedAt":"%s"}}' "$(iso_ago "$1")"; }
+STOPPED_JSON='{"State":{"Running":false,"StartedAt":"2026-11-01T00:00:00.000000000Z"}}'
+export STUB_SOCK_TOKEN=trentina
+# Agent started after the gateway: its MCP client is current.
+STUB_SOCK="$(started 300)" STUB_SOCK_ALT="$(started 600)" \
+    expect "agent newer than the gateway is OK" 0 "OK .*MCP client is current" any -- "$GS" agent trentina 900
+# Gateway restarted after the agent and is past the grace: the client is gone.
+STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 3600)" \
+    expect "gateway newer, past grace, is CRITICAL" 2 "CRITICAL .*lost its MCP client" any -- "$GS" agent trentina 900
+# Same shape, but the gateway came up seconds ago: a restart sequence in
+# progress must not page.
+STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 60)" \
+    expect "gateway newer, inside grace, is OK" 0 "OK .*inside the 900s grace" any -- "$GS" agent trentina 900
+STUB_SOCK="$STOPPED_JSON" STUB_SOCK_ALT="$(started 60)" \
+    expect "a stopped agent is CRITICAL" 2 "CRITICAL .*not running" any -- "$GS" agent trentina 900
+STUB_SOCK="$(started 300)" STUB_SOCK_ALT="$STOPPED_JSON" \
+    expect "a stopped gateway is UNKNOWN, not the agent's fault" 3 "UNKNOWN .*not running" any -- "$GS" agent trentina 900
+STUB_SOCK="$(started 300)" \
+    STUB_SOCK_ALT='{"cause":"no such container","message":"no container with name or ID \"trentina\" found","response":404}' \
+    expect "a missing gateway is UNKNOWN" 3 "UNKNOWN .*no container" any -- "$GS" agent trentina 900
+STUB_SOCK='{"cause":"no such container","message":"no container with name or ID \"agent\" found","response":404}' \
+    expect "a missing agent is CRITICAL" 2 "CRITICAL .*no container" any -- "$GS" agent trentina 900
+STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$GS" agent trentina 900
+expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$GS" '../../x#' trentina 900
+expect "a non-numeric grace is rejected" 3 "UNKNOWN - grace" any -- "$GS" agent trentina abc
+unset STUB_SOCK_TOKEN
 
 echo "=== check_container_httpd_internal ==="
 IPJSON='{"NetworkSettings":{"IPAddress":"","Networks":{"podman":{"IPAddress":"10.88.0.7"}}}}'
