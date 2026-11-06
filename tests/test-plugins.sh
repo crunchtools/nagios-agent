@@ -97,6 +97,9 @@ GS="$LIBEXEC/check_agent_gateway_stale.sh"
 # agrees whichever coreutils is installed (ubuntu-26.04 runners ship uutils).
 iso_ago() { date -u -d "@$(( $(date +%s) - $1 ))" +%Y-%m-%dT%H:%M:%S.000000000Z; }
 started() { printf '{"State":{"Running":true,"StartedAt":"%s"}}' "$(iso_ago "$1")"; }
+# Same second, gateway later by a fraction: whole-second arithmetic called this
+# healthy for ever.
+same_second() { printf '{"State":{"Running":true,"StartedAt":"%sT00:00:00.%09d-05:00"}}' 2026-11-01 "$1"; }
 STOPPED_JSON='{"State":{"Running":false,"StartedAt":"2026-11-01T00:00:00.000000000Z"}}'
 export STUB_SOCK_TOKEN=trentina
 # Agent started after the gateway: its MCP client is current.
@@ -109,6 +112,10 @@ STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 3600)" \
 # progress must not page.
 STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 60)" \
     expect "gateway newer, inside grace, is OK" 0 "OK .*inside the 900s grace" any -- "$GS" agent trentina 900
+STUB_SOCK="$(same_second 100000000)" STUB_SOCK_ALT="$(same_second 900000000)" \
+    expect "gateway later within the same second is still CRITICAL" 2 "CRITICAL .*lost its MCP client" any -- "$GS" agent trentina 900
+STUB_SOCK="$(same_second 900000000)" STUB_SOCK_ALT="$(same_second 100000000)" \
+    expect "agent later within the same second is OK" 0 "OK .*MCP client is current" any -- "$GS" agent trentina 900
 STUB_SOCK="$STOPPED_JSON" STUB_SOCK_ALT="$(started 60)" \
     expect "a stopped agent is CRITICAL" 2 "CRITICAL .*not running" any -- "$GS" agent trentina 900
 STUB_SOCK="$(started 300)" STUB_SOCK_ALT="$STOPPED_JSON" \

@@ -68,7 +68,31 @@ started_at() {
         return 1
     fi
     iso=$(printf '%s' "$raw" | grep -oP '"StartedAt"\s*:\s*"\K[^"]+' | head -1)
-    date -d "$iso" +%s 2>/dev/null || { echo "unparseable StartedAt '$iso'" >&2; return 2; }
+    started_key "$iso" || { echo "unparseable StartedAt '$iso'" >&2; return 2; }
+}
+
+# A comparable NANOSECOND key for an RFC3339 stamp like
+# 2026-11-06T01:01:13.120484139-05:00.
+#
+# Whole seconds are not enough: a gateway that restarts in the same second as
+# the agent, but after it, would compare equal and read as healthy for ever.
+# The fraction is taken from the string rather than from `date +%N`, which not
+# every coreutils has -- the ubuntu-26.04 runners these tests run on ship
+# uutils. And the stamps are NOT compared as strings: they carry a local UTC
+# offset, so two containers either side of a daylight-saving change would
+# order wrongly.
+started_key() {
+    local iso=$1 seconds fraction
+    seconds=$(date -d "$iso" +%s 2>/dev/null) || return 1
+    [[ "$seconds" =~ ^-?[0-9]+$ ]] || return 1
+    fraction=0
+    if [[ "$iso" =~ \.([0-9]+) ]]; then
+        fraction=${BASH_REMATCH[1]}
+        fraction=${fraction}000000000
+        fraction=${fraction:0:9}
+        fraction=$((10#$fraction))
+    fi
+    echo "$((seconds * 1000000000 + fraction))"
 }
 
 # A private file for the reason string, not a fixed /tmp path: two checks run
@@ -91,11 +115,14 @@ if ! GATEWAY_STARTED=$(started_at "$GATEWAY" 2>"$ERR"); then
 fi
 
 NOW=$(date +%s)
-BEHIND=$((GATEWAY_STARTED - AGENT_STARTED))
-GATEWAY_AGE=$((NOW - GATEWAY_STARTED))
+# Back to whole seconds for the message; the comparison above is the exact one.
+BEHIND=$(( (GATEWAY_STARTED - AGENT_STARTED) / 1000000000 ))
+GATEWAY_AGE=$(( NOW - GATEWAY_STARTED / 1000000000 ))
+STALE=0
+[ "$GATEWAY_STARTED" -gt "$AGENT_STARTED" ] && STALE=1
 PERFDATA="seconds_behind=${BEHIND};0;0;; gateway_age=${GATEWAY_AGE}s"
 
-if [ "$BEHIND" -le 0 ]; then
+if [ "$STALE" -eq 0 ]; then
     echo "OK - $AGENT started ${BEHIND#-}s after $GATEWAY, so its MCP client is current | $PERFDATA"
     exit 0
 fi
