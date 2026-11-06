@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.4.0] - 2026-11-06
+
+### Fixed
+
+- **`check_personal_backup_freshness.sh` no longer expects `Projects`.** pbs
+  2.3.1 (crunchtools/pbs#45) dropped `pcloud:/Projects` from the Files rotation,
+  because Scott moved `~/Projects` to a one-way backup at
+  `pcloud:Backups/Servers/breetai.dc2.crunchtools.com/Projects` on 2026-11-04 —
+  two-way sync had been writing `.conflict` copies into live git repositories —
+  so the source folder no longer exists and rotating a backup is redundant.
+
+  This check kept the name in its own hardcoded `DIRECTORIES`, which is the
+  worse half of the bug: pbs will never write that marker again, so the marker
+  can never be refreshed, and the rotation would have gone STALE and stayed
+  CRITICAL with nothing anyone could do about it. A permanent CRITICAL on a
+  backup check is the one that must never be allowed to stand.
+
+  The header now says in as many words that this list has to track `pbs.sh`'s
+  `directories`, because the two files have no other link and nothing else
+  would catch the next divergence. RT#1556
+
 ## [8.3.0] - 2026-11-06
 
 ### Changed

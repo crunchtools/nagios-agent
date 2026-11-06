@@ -248,23 +248,23 @@ STUB
 chmod +x "$RSTUBS/rclone"
 pcol() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$COL" personal; }
 pb() { rm -f "$PSTAT"; pcol; chk "$PB"; }
-# markers <weekly age days> <monthly age days> [rclone exit]: all twelve markers
+# markers <weekly age days> <monthly age days> [rclone exit]: all nine markers
 markers() {
     local now; now=$(date +%s)
-    for d in Documents Downloads Autosync Projects; do
+    for d in Documents Downloads Autosync; do
         echo "Files|$d|Weekly-1|0|$((now - $1 * 86400))|${3:-0}"
         echo "Files|$d|Monthly-1|0|$((now - $2 * 86400))|0"
         echo "Files|$d|Monthly-2|0|$((now - $2 * 86400))|0"
     done
 }
-STUB_MARKERS="$(markers 2 40)" expect "all twelve fresh" 0 "OK - Weekly-1 4/4 fresh \\(worst 2d\\); Monthly-1 4/4 .*problems=0" no -- pb
+STUB_MARKERS="$(markers 2 40)" expect "all nine fresh" 0 "OK - Weekly-1 3/3 fresh \\(worst 2d\\); Monthly-1 3/3 .*problems=0" no -- pb
 STUB_MARKERS="$(markers 10 40)" expect "weekly past warn" 1 "WARNING .*Documents/Weekly-1: aging 10d" any -- pb
-STUB_MARKERS="$(markers 16 40)" expect "weekly past crit" 2 "CRITICAL .*Projects/Weekly-1: STALE 16d" any -- pb
-STUB_MARKERS="$(markers 2 69)" expect "monthly just inside warn" 0 "OK .*Monthly-2 4/4" any -- pb
+STUB_MARKERS="$(markers 16 40)" expect "weekly past crit" 2 "CRITICAL .*Autosync/Weekly-1: STALE 16d" any -- pb
+STUB_MARKERS="$(markers 2 69)" expect "monthly just inside warn" 0 "OK .*Monthly-2 3/3" any -- pb
 STUB_MARKERS="$(markers 2 100)" expect "monthly past crit" 2 "CRITICAL .*Autosync/Monthly-1: STALE 100d" any -- pb
 STUB_MARKERS="$(markers 0 40 3)" expect "fresh but failed run is CRITICAL" 2 "CRITICAL .*last run FAILED \\(rclone exit 3\\), 0d ago" any -- pb
 STUB_MARKERS="$(markers 2 40 | grep -v 'Downloads|Monthly-2')" \
-    expect "one missing marker" 2 "CRITICAL .*Monthly-2 3/4 .*Downloads/Monthly-2: MISSING marker" any -- pb
+    expect "one missing marker" 2 "CRITICAL .*Monthly-2 2/3 .*Downloads/Monthly-2: MISSING marker" any -- pb
 STUB_MARKERS="$(markers 2 40 | sed 's/^Files|Autosync|Weekly-1|.*/Files|Autosync|Weekly-1|oops/')" \
     expect "garbled marker" 2 "CRITICAL .*Autosync/Weekly-1: unreadable marker" any -- pb
 STUB_MARKERS="" STUB_RCLONE_RC=3 expect "no markers at all" 2 "CRITICAL - cannot read markers .*rclone exit 3" any -- pb
@@ -273,11 +273,11 @@ STUB_MARKERS="$(markers 2 40)" STUB_RCLONE_RC=1 expect "failed read is not judge
 STUB_MARKERS="" STUB_RCLONE_RC=124 expect "first-ever read timing out is UNKNOWN" 3 "UNKNOWN - collector timed out" any -- pb
 rm -f "$PSTAT"; STUB_MARKERS="$(markers 2 40)" pcol
 STUB_MARKERS="" STUB_RCLONE_RC=124 pcol
-expect "timeout keeps the last markers" 0 "OK - Weekly-1 4/4 fresh" no -- chk "$PB"
+expect "timeout keeps the last markers" 0 "OK - Weekly-1 3/3 fresh" no -- chk "$PB"
 grep -q 'lastfail=timeout' "$PSTAT" && { echo "  PASS: timeout is recorded as lastfail"; PASS=$((PASS + 1)); } \
     || { echo "  FAIL: no lastfail=timeout in status"; FAIL=$((FAIL + 1)); }
 rm -f "$PSTAT"; STUB_MARKERS="$(markers 2 40)" pcol; age_file "$PSTAT" 1500
-expect "status past REFRESH is still judged" 0 "OK - Weekly-1 4/4" any -- chk "$PB"
+expect "status past REFRESH is still judged" 0 "OK - Weekly-1 3/3" any -- chk "$PB"
 kicked "status past REFRESH starts the collector" yes
 age_file "$PSTAT" 7300
 expect "status older than 2h is UNKNOWN collector stale" 3 "^PERSONAL BACKUPS UNKNOWN - collector stale: last collection 2h" yes -- chk "$PB"

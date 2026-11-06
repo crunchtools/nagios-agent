@@ -2,8 +2,16 @@
 # check_personal_backup_freshness.sh — personal pCloud rotation freshness (Nagios/NRPE)
 #
 # The PersonalBackups units run pbs's Files module: a pCloud-to-pCloud sync of
-# Documents, Downloads, Autosync and Projects into Weekly-1, Monthly-1 and
-# Monthly-2. That sync leaves nothing behind to judge it by: copied files keep
+# Documents, Downloads and Autosync into Weekly-1, Monthly-1 and Monthly-2.
+#
+# Projects was in that list until pbs 2.3.1 (crunchtools/pbs#45). Scott moved
+# ~/Projects to a one-way backup at
+# pcloud:Backups/Servers/breetai.dc2.crunchtools.com/Projects on 2026-11-04,
+# because two-way sync had been writing .conflict copies into live git repos,
+# so pcloud:/Projects no longer exists and rotating a backup is redundant.
+# THIS LIST MUST TRACK pbs.sh's `directories`: a name here that pbs no longer
+# syncs leaves a marker that can never be refreshed, which is a CRITICAL nobody
+# can clear. That sync leaves nothing behind to judge it by: copied files keep
 # their source mtime and pCloud folder mtimes only move when a direct child
 # changes. So pbs writes one marker per directory and rotation after each sync:
 #
@@ -36,7 +44,7 @@ CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 REFRESH=${REFRESH:-1200}
 STALE=${STALE:-7200}
 BASE=pcloud:Backups/Rotations
-DIRECTORIES="Documents Downloads Autosync Projects"
+DIRECTORIES="Documents Downloads Autosync"
 NOW=$(date +%s)
 
 W_WARN=9  W_CRIT=16    # days — Weekly-1 runs Fridays 06:00
