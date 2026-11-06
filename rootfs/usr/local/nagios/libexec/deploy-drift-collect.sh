@@ -85,6 +85,14 @@ check_one() {
     # pbs runs as one-shot backup jobs that pull their own image (--pull=newer).
     # The autoupdate label would let auto-update restart one mid-backup.
     case "$ref" in "${PREFIX}pbs:"*) printf '%s IGNORED\n' "${id:0:12}"; return ;; esac
+    # The developer seats carry no autoupdate label on purpose (RT #1556,
+    # Scott 2026-11-06): an agent in one runs jobs that take hours, and
+    # auto-update restarting it at 03:00 destroys the work. A release lands
+    # there when a seat is restarted deliberately, between jobs. Reporting
+    # that as drift would leave a WARNING nobody can ever clear, and a
+    # standing WARNING teaches the fleet to ignore this check -- which is the
+    # exact failure it was written to catch.
+    case "$ref" in "${PREFIX}developer:"*) printf '%s IGNORED\n' "${id:0:12}"; return ;; esac
 
     auto=$(printf '%s' "$raw" | grep -oP '"io\.containers\.autoupdate":\s*"\K[^"]+' | head -1)
     if [ "$auto" != "registry" ]; then

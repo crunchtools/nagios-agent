@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.3.0] - 2026-11-06
+
+### Changed
+
+- `deploy-drift-collect.sh` ignores `quay.io/crunchtools/developer`, the way it
+  already ignores `pbs`. The three developer seats on gloval carry no
+  `io.containers.autoupdate=registry` label on purpose (RT #1556, Scott
+  2026-11-06): an agent in one runs jobs that take hours, and auto-update
+  restarting it at 03:00 destroys the work. A release reaches a seat when the
+  seat is restarted deliberately, between jobs.
+
+  Reported as `unmanaged`, that is a WARNING nobody can ever clear — and a
+  standing WARNING is how a fleet learns to ignore a check. This one exists
+  because three MCP servers sat releases behind with every check green
+  (2026-10-24); the way to lose that is to leave it crying wolf. RT#1556
+
 ## [8.2.0] - 2026-11-06
 
 ### Changed
