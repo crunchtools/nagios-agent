@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.2.0] - 2026-11-07
+
 ### Added
 - `config-sources.conf` maps the last six services the check could reach but
   nobody had claimed: the three `developer` seats, both GHA runners,
