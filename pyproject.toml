@@ -27,6 +27,13 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "T10", "ISC", "PIE", "RET", "SIM", "TID", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# S101 is pytest's assert. S603 and S607 are for check_deployer.sh's test: the
+# thing under test IS a shell plugin, so testing it means executing it. The
+# argument vector is a path computed from __file__ plus a tmp_path, with no
+# input from anywhere else -- which is the condition S603 asks about.
+"tests/*" = ["S101", "S603", "S607"]
+
 [tool.ruff.lint.pylint]
 max-branches = 12
 max-statements = 50

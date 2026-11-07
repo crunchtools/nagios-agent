@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`check_deployer.sh`**: the holds the deploy robot
+  ([crunchtools/deployer](https://github.com/crunchtools/deployer)) has placed,
+  and whether anything still honours them. OK with no holds and the auto-update
+  hold guard installed; WARNING for a hold or a failed last run; CRITICAL when a
+  hold exists but `ExecCondition` on `podman-auto-update.service` is empty, when
+  a hold has stood 24h, or when a rollback failed to verify; UNKNOWN when the
+  state directory cannot be read.
+
+  A hold with no guard is CRITICAL rather than WARNING because it reads as
+  protection that is not there: the image that was rolled back goes live again
+  at the next auto-update.
+
+  It reads the host — the hold files and one systemd property — and deliberately
+  *not* the deployer's own status file, which is written only when a ticket runs.
+  A hold placed last week sits under a `generated=` from last week too, so that
+  file's age says nothing about whether a hold is current. Everything it reads
+  is local, so this is a plain check and not a collector (constitution XVI).
+
 ## [8.4.0] - 2026-11-06
 
 ### Fixed

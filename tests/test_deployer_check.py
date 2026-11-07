@@ -1,0 +1,175 @@
+"""check_deployer.sh: every verdict path, against a real state directory.
+
+The precedence is the part worth testing. A hold with no guard outranks a stale
+hold, which outranks a failed rollback, which outranks a plain hold — because
+"nothing is honouring this hold" is the one that means the rolled-back image is
+going live again tonight.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+CHECK = Path(__file__).resolve().parents[1] / "rootfs/usr/local/nagios/libexec/check_deployer.sh"
+
+OK = 0
+WARNING = 1
+CRITICAL = 2
+UNKNOWN = 3
+STALE_HOLD_SECONDS = 24 * 60 * 60
+
+
+@pytest.fixture
+def guard(tmp_path: Path) -> Path:
+    """A stub systemctl that reports an ExecCondition, i.e. the guard installed."""
+    path = tmp_path / "systemctl-with-guard"
+    path.write_text('#!/bin/sh\necho "/usr/bin/test -x /var/lib/deployer/hold"\n', encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture
+def no_guard(tmp_path: Path) -> Path:
+    """A stub systemctl that reports nothing, i.e. the guard missing."""
+    path = tmp_path / "systemctl-no-guard"
+    path.write_text("#!/bin/sh\necho\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def state(tmp_path: Path) -> Path:
+    directory = tmp_path / "state" / "hold"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory.parent
+
+
+def place_hold(
+    state_dir: Path, unit: str = "acquacotta.crunchtools.com.service", ticket: int = 1234, age_seconds: int = 0
+) -> Path:
+    path = state_dir / "hold" / unit
+    path.write_text(json.dumps({"unit": unit, "ticket": ticket, "revision": "f" * 40}), encoding="utf-8")
+    if age_seconds:
+        placed = time.time() - age_seconds
+        os.utime(path, (placed, placed))
+    return path
+
+
+def write_status(state_dir: Path, outcome: str, whole: bool = True) -> None:
+    lines = [f"DEPLOYER generated={int(time.time())} outcome={outcome} detail=x"]
+    if whole:
+        lines.append("DEPLOYER end=1")
+    (state_dir / "deployer.status").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run(state_dir: Path | str, systemctl: Path | None = None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    if systemctl is not None:
+        env["SYSTEMCTL"] = str(systemctl)
+    return subprocess.run(["bash", str(CHECK), str(state_dir)], capture_output=True, text=True, env=env, check=False)
+
+
+def test_a_missing_state_directory_is_unknown(guard: Path) -> None:
+    # Not CRITICAL: the deployer may simply not be installed on this host, and
+    # a check cannot tell that from a broken one.
+    result = run("/nonexistent-deployer-state", guard)
+    assert result.returncode == UNKNOWN
+    assert "UNKNOWN" in result.stdout
+
+
+def test_no_holds_and_a_guard_is_ok(tmp_path: Path, guard: Path) -> None:
+    result = run(state(tmp_path), guard)
+    assert result.returncode == OK
+    assert "no deployer holds" in result.stdout
+    assert "held=0" in result.stdout
+
+
+def test_a_hold_is_a_warning(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory)
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "1 deployer hold(s)" in result.stdout
+    # The unit, its age and the ticket, so the alert names what to go and read.
+    assert "acquacotta.crunchtools.com.service:0h:1234" in result.stdout
+
+
+def test_a_hold_with_no_guard_is_critical(tmp_path: Path, no_guard: Path) -> None:
+    # The important one. A hold nothing honours reads as protection that is not
+    # there, and the rolled-back image goes live at the next auto-update.
+    directory = state(tmp_path)
+    place_hold(directory)
+    result = run(directory, no_guard)
+    assert result.returncode == CRITICAL
+    assert "nothing honours them" in result.stdout
+
+
+def test_no_guard_without_a_hold_is_only_a_warning(tmp_path: Path, no_guard: Path) -> None:
+    # Nothing is at risk yet; it is still wrong and still worth saying.
+    result = run(state(tmp_path), no_guard)
+    assert result.returncode == WARNING
+    assert "would not stick" in result.stdout
+
+
+def test_a_hold_standing_a_day_is_critical(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=STALE_HOLD_SECONDS + 3600)
+    result = run(directory, guard)
+    assert result.returncode == CRITICAL
+    assert "fleet updates are frozen" in result.stdout
+
+
+def test_a_failed_rollback_is_critical(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    write_status(directory, "rollback-failed")
+    result = run(directory, guard)
+    assert result.returncode == CRITICAL
+    assert "rollback did not verify" in result.stdout
+
+
+def test_a_truncated_status_file_is_a_warning(tmp_path: Path, guard: Path) -> None:
+    # Without end=1 the contents are not evidence of anything, so the check
+    # says so rather than reading a half-written outcome as "ok".
+    directory = state(tmp_path)
+    write_status(directory, "ok", whole=False)
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "truncated" in result.stdout
+
+
+def test_a_whole_ok_status_is_ok(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    write_status(directory, "ok")
+    result = run(directory, guard)
+    assert result.returncode == OK
+
+
+def test_the_scratch_file_of_an_in_flight_write_is_not_a_hold(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    (directory / "hold" / ".acquacotta.service.new").write_text("{}", encoding="utf-8")
+    result = run(directory, guard)
+    assert result.returncode == OK
+
+
+def test_a_hold_with_unreadable_contents_still_counts(tmp_path: Path, guard: Path) -> None:
+    # The file's existence is the hold. Losing the ticket number must not lose
+    # the alert.
+    directory = state(tmp_path)
+    (directory / "hold" / "a.service").write_text("not json", encoding="utf-8")
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "a.service:0h:?" in result.stdout
+
+
+def test_performance_data_carries_the_counts(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=7200)
+    result = run(directory, guard)
+    assert "held=1" in result.stdout
+    assert "oldest_hold=" in result.stdout
+    assert f";;{STALE_HOLD_SECONDS}" in result.stdout
