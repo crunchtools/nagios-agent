@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.1.0] - 2026-11-07
+
 ### Added
 - `config-sources.conf` maps `deployer.crunchtools.com` to the `deployer` repo.
   It was UNMAPPED, so nothing was comparing the deployed unit and registry
