@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.0.0] - 2026-11-07
+
 ### Changed
 - **BREAKING (constitution: Plugin Interface Versioning).** `check_deployer.sh`
   gives a different verdict for three of the deployer's outcomes — `refused`,
