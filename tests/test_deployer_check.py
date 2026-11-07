@@ -124,6 +124,34 @@ def test_a_hold_standing_a_day_is_critical(tmp_path: Path, guard: Path) -> None:
     assert "fleet updates are frozen" in result.stdout
 
 
+def test_a_refused_ticket_is_not_reported_here(tmp_path: Path, guard: Path) -> None:
+    # A refusal is a DECIDED state: the deployer exits 0 for one and the
+    # stalled ticket is the channel. Warning here would contradict that, and
+    # would outlast the problem -- this file is rewritten only when a ticket
+    # runs, so a refusal on Tuesday would still be amber on Friday.
+    directory = state(tmp_path)
+    write_status(directory, "refused")
+    result = run(directory, guard)
+    assert result.returncode == OK
+
+
+def test_a_rolled_back_outcome_is_left_to_the_hold(tmp_path: Path, guard: Path) -> None:
+    # The hold is live state and is already reported. The outcome is history.
+    directory = state(tmp_path)
+    write_status(directory, "rolled-back")
+    result = run(directory, guard)
+    assert result.returncode == OK
+
+
+def test_a_could_not_run_outcome_is_a_warning(tmp_path: Path, guard: Path) -> None:
+    # Nothing else reports this one: the deployer could not work at all.
+    directory = state(tmp_path)
+    write_status(directory, "could-not-run")
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "could-not-run" in result.stdout
+
+
 def test_a_failed_rollback_is_critical(tmp_path: Path, guard: Path) -> None:
     directory = state(tmp_path)
     write_status(directory, "rollback-failed")
@@ -229,7 +257,7 @@ def test_a_failed_rollback_outranks_a_plain_hold(tmp_path: Path, guard: Path) ->
 def test_a_hold_outranks_a_merely_odd_last_outcome(tmp_path: Path, guard: Path) -> None:
     directory = state(tmp_path)
     place_hold(directory)
-    write_status(directory, "refused")
+    write_status(directory, "could-not-run")
     result = run(directory, guard)
     assert result.returncode == WARNING
     assert "deployer hold(s)" in result.stdout

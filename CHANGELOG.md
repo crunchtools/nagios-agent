@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `check_deployer.sh` no longer warns about a ticket the deployer **refused**.
+  A refusal is a decided state — the deployer exits 0 for one, and the stalled
+  ticket owned by whoever filed it is the channel — so warning here contradicted
+  that contract. It also outlasted the problem: the status file is rewritten only
+  when a ticket runs, so a refusal on Tuesday was still amber on Friday with the
+  ticket long since dealt with. A `rolled-back` outcome is likewise left to the
+  hold, which is live state and already reported. `could-not-run` and a
+  truncated file still warn, because nothing else reports those.
+
 ## [8.5.0] - 2026-11-07
 
 ### Release note
