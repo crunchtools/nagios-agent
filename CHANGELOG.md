@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- A **Linux MCP Server** service on gloval (RT #1568), watching the
+  linux-mcp-server unit that is the Josui Prime agent's administration path
+  into that host. It reuses `check_service_running.sh` rather than adding a
+  plugin: the unit is `Restart=always`, so a broken one loops between
+  auto-restart and activating and never reaches `failed` — the gap that check
+  already exists for.
+
+  The failure most likely in practice is not a crash. The unit has a
+  `ConditionPathExists` on an env file that is per-host and deliberately
+  absent from the bootc image, and its preflight refuses to start without the
+  nftables fence loaded, so either one going missing leaves the unit
+  `inactive` — CRITICAL here, and the service notes say where to look.
+
+  No port check: that port admits only the gateway's address, and probing it
+  from the monitoring container would mean widening the rule for a root
+  script-execution service.
+
 ## [9.0.0] - 2026-11-07
 
 ### Changed
