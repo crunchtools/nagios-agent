@@ -19,6 +19,7 @@
 #   DDRIFT generated=<epoch> error=list_failed|no_containers
 #   DDRIFT item=<id12> seen=<epoch> kind=IGNORED|PINNED
 #   DDRIFT item=<id12> seen=<epoch> kind=UNMANAGED|CURRENT|UNKNOWN name=<name>
+#   DDRIFT item=<id12> seen=<epoch> kind=DEPLOYER|CONTESTED name=<name>
 #   DDRIFT item=<id12> seen=<epoch> kind=BEHIND name=<name> since=<epoch>
 #   DDRIFT end=1
 #
@@ -95,6 +96,28 @@ check_one() {
     case "$ref" in "${PREFIX}developer:"*) printf '%s IGNORED\n' "${id:0:12}"; return ;; esac
 
     auto=$(printf '%s' "$raw" | grep -oP '"io\.containers\.autoupdate":\s*"\K[^"]+' | head -1)
+    # A POSITIVE MARKER, not another image-name exception. A service in the
+    # deploy robot's registry carries io.crunchtools.deploy=deployer and
+    # deliberately carries no autoupdate label: it is deployed by ticket, with
+    # a maintenance window, a health probe and a rollback, and auto-update
+    # restarting it at 03:00 would put an unverified image live. "Behind the
+    # tag" is therefore its NORMAL state and not a defect -- which is exactly
+    # why the marker has to be a label on the container rather than a list of
+    # images in this file. The registry grows service by service, and a check
+    # that needed editing for each one would be a check that was wrong between
+    # edits. check_deployer.sh is what watches these.
+    mark=$(printf '%s' "$raw" | grep -oP '"io\.crunchtools\.deploy":\s*"\K[^"]+' | head -1)
+    if [ "$mark" = "deployer" ]; then
+        # BOTH mechanisms claiming one service is a real misconfiguration and
+        # the likely mistake when onboarding: auto-update would deploy an
+        # unverified image behind the robot's back, and the robot would roll
+        # back something auto-update had just put there. Reported, not silently
+        # resolved in favour of either one.
+        if [ "$auto" = "registry" ]; then
+            printf '%s CONTESTED %s\n' "${id:0:12}" "$name"; return
+        fi
+        printf '%s DEPLOYER %s\n' "${id:0:12}" "$name"; return
+    fi
     if [ "$auto" != "registry" ]; then
         printf '%s UNMANAGED %s\n' "${id:0:12}" "$name"; return
     fi
@@ -144,7 +167,7 @@ done < "$TMP/results"
         line="DDRIFT item=$id seen=$START kind=$kind${name:+ name=$name}${since:+ since=$since}"
         if [ "$kind" = UNKNOWN ]; then
             # Could not look this time: keep the last real answer if there is one.
-            prev=$(cl_previous "$STATUS" "^DDRIFT item=$id seen=[0-9]+ kind=(IGNORED|PINNED|UNMANAGED|CURRENT|BEHIND)( |$)" | head -1)
+            prev=$(cl_previous "$STATUS" "^DDRIFT item=$id seen=[0-9]+ kind=(IGNORED|PINNED|UNMANAGED|DEPLOYER|CONTESTED|CURRENT|BEHIND)( |$)" | head -1)
             [ -n "$prev" ] && line=$prev
         fi
         echo "$line"
