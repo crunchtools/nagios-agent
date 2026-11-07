@@ -11,9 +11,17 @@
 # reads is local — a directory listing and one systemctl property — so there is
 # nothing slow to move off the check path.
 #
+# WHAT THIS DELIBERATELY DOES NOT REPORT. A ticket the deployer REFUSED -- an
+# unknown service, a commit nothing built, a requestor not listed. That is a
+# decided state: the deployer exits 0 for one, and the ticket is stalled and
+# owned by whoever filed it, which is the channel. Warning here would also
+# outlast the problem, because this file is rewritten only when a ticket runs,
+# so a refusal on Tuesday would still be amber on Friday.
+#
 # Verdicts:
 #   OK        no holds, and the auto-update hold guard is installed
-#   WARNING   a hold exists, or the deployer's last run failed
+#   WARNING   a hold exists, the deployer could not run at all, or its last
+#             outcome is one this check does not recognise
 #   CRITICAL  a hold exists but nothing honours it (the guard is gone);
 #             a hold has stood for 24h or more; or a rollback failed to verify
 #   UNKNOWN   the state directory cannot be read
@@ -125,10 +133,25 @@ if [ "${#holds[@]}" -gt 0 ]; then
     exit 1
 fi
 
-if [ -n "$last_outcome" ] && [ "$last_outcome" != "ok" ]; then
-    echo "WARNING - the deployer's last run ended $last_outcome | $perf"
-    exit 1
-fi
+# Named the other way round: the outcomes that are FINE, with everything else
+# warning -- including one this check has never heard of. A list of outcomes to
+# warn about would read an outcome added to the deployer later as healthy,
+# which is the wrong direction for the two to drift in.
+#
+#   ok           nothing to do, or a verified deploy.
+#   refused      a DECIDED state. The deployer exits 0 for one, and the stalled
+#                ticket owned by whoever filed it is the channel. Warning here
+#                would contradict that, and would outlast the problem, because
+#                this file is rewritten only when a ticket runs.
+#   rolled-back  leaves a hold, which the branches above already report from
+#                live state rather than from history.
+case $last_outcome in
+    "" | ok | refused | rolled-back) ;;
+    *)
+        echo "WARNING - the deployer's last run ended $last_outcome | $perf"
+        exit 1
+        ;;
+esac
 
 if [ -z "$guard" ]; then
     echo "WARNING - no ExecCondition on $GUARD_UNIT: nothing holds yet, but a rollback would not stick | $perf"
