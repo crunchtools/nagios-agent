@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.3.0] - 2026-11-07
+
 ### Added
 - `check_deploy_drift.sh` understands `io.crunchtools.deploy=deployer`. A
   container carrying that marker and no auto-update label is counted as
