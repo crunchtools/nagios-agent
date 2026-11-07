@@ -24,6 +24,7 @@
 #             outcome is one this check does not recognise
 #   CRITICAL  a hold exists but nothing honours it (the guard is gone);
 #             a hold has stood for 24h or more; or a rollback failed to verify
+#             AND the hold it placed still stands
 #   UNKNOWN   the state directory cannot be read
 #
 # The guard case is CRITICAL rather than WARNING on purpose. A hold with no
@@ -123,7 +124,23 @@ if [ "$oldest_age" -ge "$STALE_HOLD_SECONDS" ]; then
     exit 2
 fi
 
-if [ "$last_outcome" = "rollback-failed" ]; then
+# Only while THAT rollback's own hold stands. A rollback that did not verify
+# always places a hold and the status file records it, so comparing the units
+# the file names against the live hold directory says whether this particular
+# failure is still outstanding -- "any hold at all" would keep service A's
+# stale failure critical because service B happens to be held.
+#
+# Without the gate the alert stayed CRITICAL until the next deploy, because
+# this file is rewritten only when a ticket runs. Measured the first time a
+# rollback was reported, with the service up and healthy on its previous image.
+still_held=0
+if [ "$last_outcome" = "rollback-failed" ] && [ -r "$STATUS_FILE" ]; then
+    while read -r unit; do
+        [ -n "$unit" ] && [ -f "$HOLD_DIR/$unit" ] && still_held=1
+    done <<< "$(sed -n 's/^DEPLOYER hold unit=\([^ ]*\).*/\1/p' "$STATUS_FILE")"
+fi
+
+if [ "$last_outcome" = "rollback-failed" ] && [ "$still_held" -eq 1 ]; then
     echo "CRITICAL - the deployer's last run rolled back and the rollback did not verify [$held_list] | $perf"
     exit 2
 fi
@@ -145,8 +162,10 @@ fi
 #                this file is rewritten only when a ticket runs.
 #   rolled-back  leaves a hold, which the branches above already report from
 #                live state rather than from history.
+#   rollback-failed  CRITICAL above WHILE ITS HOLD STANDS. Reaching here means
+#                the hold is gone, so a person has dealt with it.
 case $last_outcome in
-    "" | ok | refused | rolled-back) ;;
+    "" | ok | refused | rolled-back | rollback-failed) ;;
     *)
         echo "WARNING - the deployer's last run ended $last_outcome | $perf"
         exit 1
