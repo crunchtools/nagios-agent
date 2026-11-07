@@ -24,6 +24,7 @@
 #             outcome is one this check does not recognise
 #   CRITICAL  a hold exists but nothing honours it (the guard is gone);
 #             a hold has stood for 24h or more; or a rollback failed to verify
+#             AND its hold still stands
 #   UNKNOWN   the state directory cannot be read
 #
 # The guard case is CRITICAL rather than WARNING on purpose. A hold with no
@@ -123,7 +124,13 @@ if [ "$oldest_age" -ge "$STALE_HOLD_SECONDS" ]; then
     exit 2
 fi
 
-if [ "$last_outcome" = "rollback-failed" ]; then
+# Only while a hold stands. A rollback that did not verify ALWAYS places a
+# hold, so a `rollback-failed` outcome with nothing held means a person has
+# already cleared it -- and this file is rewritten only when a ticket runs, so
+# without this the alert would stay CRITICAL until the next deploy. Measured:
+# that is exactly what happened the first time a rollback was reported, with
+# the service up and healthy on its previous image.
+if [ "$last_outcome" = "rollback-failed" ] && [ "${#holds[@]}" -gt 0 ]; then
     echo "CRITICAL - the deployer's last run rolled back and the rollback did not verify [$held_list] | $perf"
     exit 2
 fi
@@ -145,8 +152,10 @@ fi
 #                this file is rewritten only when a ticket runs.
 #   rolled-back  leaves a hold, which the branches above already report from
 #                live state rather than from history.
+#   rollback-failed  CRITICAL above WHILE ITS HOLD STANDS. Reaching here means
+#                the hold is gone, so a person has dealt with it.
 case $last_outcome in
-    "" | ok | refused | rolled-back) ;;
+    "" | ok | refused | rolled-back | rollback-failed) ;;
     *)
         echo "WARNING - the deployer's last run ended $last_outcome | $perf"
         exit 1

@@ -154,10 +154,23 @@ def test_a_could_not_run_outcome_is_a_warning(tmp_path: Path, guard: Path) -> No
 
 def test_a_failed_rollback_is_critical(tmp_path: Path, guard: Path) -> None:
     directory = state(tmp_path)
+    place_hold(directory)
     write_status(directory, "rollback-failed")
     result = run(directory, guard)
     assert result.returncode == CRITICAL
     assert "rollback did not verify" in result.stdout
+
+
+def test_a_failed_rollback_whose_hold_was_cleared_is_over(tmp_path: Path, guard: Path) -> None:
+    # A rollback that did not verify ALWAYS places a hold, so no hold means a
+    # person has dealt with it. Without this the alert stayed CRITICAL until
+    # the next deploy, because this file is rewritten only when a ticket runs
+    # -- measured the first time a rollback was reported, with the service up
+    # and healthy on its previous image.
+    directory = state(tmp_path)
+    write_status(directory, "rollback-failed")
+    result = run(directory, guard)
+    assert result.returncode == OK
 
 
 def test_a_truncated_status_file_is_a_warning(tmp_path: Path, guard: Path) -> None:

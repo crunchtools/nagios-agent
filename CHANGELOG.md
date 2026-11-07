@@ -13,6 +13,12 @@ All notable changes to this project are documented here. The format follows
   a MAJOR bump.
 
 ### Fixed
+- The `rollback-failed` CRITICAL now requires its **hold to still stand**. A
+  rollback that does not verify always places a hold, so a `rollback-failed`
+  outcome with nothing held means a person has already cleared it — and since
+  the status file is rewritten only when a ticket runs, the alert otherwise
+  stayed CRITICAL until the next deploy. Measured the first time a rollback was
+  reported, with the service up and healthy on its previous image.
 - `check_deployer.sh` no longer warns about a ticket the deployer **refused**.
   A refusal is a decided state — the deployer exits 0 for one, and the stalled
   ticket owned by whoever filed it is the channel — so warning here contradicted
