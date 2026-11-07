@@ -20,14 +20,21 @@ cat > "$STUBS/curl" <<'STUB'
 # STUB_SOCK answers every socket call, unless STUB_SOCK_TOKEN is set and the
 # URL contains it, in which case STUB_SOCK_ALT answers instead. Two containers
 # inspected in one plugin need two answers.
+#
+# STUB_SOCK_ALT_RC gives the matched call its own exit status, which is how a
+# LISTING THAT SUCCEEDS and an INSPECT THAT FAILS are told apart: a token of
+# the container id matches only the per-container URL, because the list is
+# `containers/json` with no id in it. Without that, STUB_SOCK_RC fails both and
+# the collector takes the keep-the-whole-previous-file path instead of the
+# per-container one.
 for a in "$@"; do
     if [ "$a" = "--unix-socket" ]; then
         url="${@: -1}"
         if [ -n "${STUB_SOCK_TOKEN:-}" ] && [ "${url#*$STUB_SOCK_TOKEN}" != "$url" ]; then
             printf '%s' "${STUB_SOCK_ALT:-}"
-        else
-            printf '%s' "${STUB_SOCK:-}"
+            exit "${STUB_SOCK_ALT_RC:-${STUB_SOCK_RC:-0}}"
         fi
+        printf '%s' "${STUB_SOCK:-}"
         exit "${STUB_SOCK_RC:-0}"
     fi
 done
@@ -771,6 +778,18 @@ STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) \
 # A marker this check has never heard of is not a free pass out of auto-update.
 STUB_SOCK=$(ctr $LATEST "" sha256:aa somethingelse) \
     expect "an unrecognised marker value is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged" no -- dd
+# RETENTION FOR THE TWO NEW KINDS. A marked container never asks Quay, so its
+# only route to UNKNOWN is the INSPECT failing -- and when inspect fails the
+# labels cannot be read, so the previous answer is the only thing that stops a
+# deployer-managed service reading as unreadable every time the socket hiccups.
+# The listing still succeeds in both of these: the token matches only the
+# per-container URL.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) dd >/dev/null
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) STUB_SOCK_TOKEN=aaaa STUB_SOCK_ALT_RC=22 ddcol
+expect "an unreadable inspect keeps a DEPLOYER answer" 0 "^DEPLOY DRIFT OK - 0/0 .*deployer=1" no -- ddchk
+STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) dd >/dev/null
+STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) STUB_SOCK_TOKEN=aaaa STUB_SOCK_ALT_RC=22 ddcol
+expect "an unreadable inspect keeps a CONTESTED answer" 1 "^DEPLOY DRIFT WARNING - .*1 contested" no -- ddchk
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
     expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") dd >/dev/null

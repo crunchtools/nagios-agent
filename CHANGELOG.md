@@ -26,6 +26,11 @@ All notable changes to this project are documented here. The format follows
   auto-update would put an unverified image live behind the robot's back, and
   the robot would roll back something auto-update had just installed. Reported
   as drift rather than silently resolved in favour of one of them.
+- `STUB_SOCK_ALT_RC` in the plugin tests, which is what lets a **listing that
+  succeeds** and an **inspect that fails** be told apart. The previous stub
+  failed both at once, so the collector took the keep-the-whole-previous-file
+  path and the per-container retention of the two new kinds could not be tested
+  at all. Both new tests were checked by breaking the line they cover.
 - The OK headline says how many containers are deployed by ticket. That count
   returning to zero on its own is the marker having been dropped from a unit,
   which is the one way this could quietly stop being true.
