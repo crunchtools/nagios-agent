@@ -132,15 +132,21 @@ if [ "${#holds[@]}" -gt 0 ]; then
     exit 1
 fi
 
-# Only the outcomes that need a person AND that nothing else reports. A
-# `refused` ticket is a DECIDED state -- the deployer exits 0 for one, and the
-# stalled ticket owned by whoever filed it is the channel -- so warning here
-# would contradict that, and would go on warning long after the ticket was
-# dealt with, because this file is only rewritten when a ticket runs. A
-# `rolled-back` outcome leaves a hold, which the branches above already report
-# from the live state rather than from history.
+# Named the other way round: the outcomes that are FINE, with everything else
+# warning -- including one this check has never heard of. A list of outcomes to
+# warn about would read an outcome added to the deployer later as healthy,
+# which is the wrong direction for the two to drift in.
+#
+#   ok           nothing to do, or a verified deploy.
+#   refused      a DECIDED state. The deployer exits 0 for one, and the stalled
+#                ticket owned by whoever filed it is the channel. Warning here
+#                would contradict that, and would outlast the problem, because
+#                this file is rewritten only when a ticket runs.
+#   rolled-back  leaves a hold, which the branches above already report from
+#                live state rather than from history.
 case $last_outcome in
-    could-not-run|truncated)
+    "" | ok | refused | rolled-back) ;;
+    *)
         echo "WARNING - the deployer's last run ended $last_outcome | $perf"
         exit 1
         ;;

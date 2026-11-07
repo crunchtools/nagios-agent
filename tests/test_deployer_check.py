@@ -328,3 +328,14 @@ def test_a_state_directory_that_cannot_be_searched_is_unknown(tmp_path: Path, gu
         directory.chmod(0o755)
     assert result.returncode == UNKNOWN
     assert "not searchable" in result.stdout
+
+
+def test_an_outcome_this_check_has_never_heard_of_warns(tmp_path: Path, guard: Path) -> None:
+    # Named the other way round on purpose: a list of outcomes to WARN about
+    # would read an outcome added to the deployer later as healthy, and the two
+    # drifting apart silently is the thing to avoid.
+    directory = state(tmp_path)
+    write_status(directory, "something-new")
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "something-new" in result.stdout

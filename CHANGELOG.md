@@ -14,7 +14,11 @@ All notable changes to this project are documented here. The format follows
   when a ticket runs, so a refusal on Tuesday was still amber on Friday with the
   ticket long since dealt with. A `rolled-back` outcome is likewise left to the
   hold, which is live state and already reported. `could-not-run` and a
-  truncated file still warn, because nothing else reports those.
+  truncated file still warn, because nothing else reports those — and so does
+  an outcome this check has never heard of, because the list is named the other
+  way round. A list of outcomes to *warn* about would read an outcome added to
+  the deployer later as healthy, and the two drifting apart silently is the
+  thing to avoid.
 
 ## [8.5.0] - 2026-11-07
 
