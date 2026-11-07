@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [8.5.0] - 2026-11-07
+
+### Release note
+
+8.1.0, 8.3.0 and 8.4.0 were written up here but never tagged and never
+published: the newest tag was `v8.2.0` and the newest image on Quay was
+`8.2.0`, so gloval had been running two minor versions behind what this file
+claimed was released. `:latest` only moves on a stable `v*` tag (see
+`build.yml`), and a push to master builds without moving it, so documenting a
+release was not releasing one.
+
+8.5.0 is therefore the first published image that contains the 8.3.0 and 8.4.0
+work, alongside everything below. Those sections are left where they are rather
+than renumbered — they describe real changes, and rewriting history here would
+make the git log and this file disagree.
+
+
 ### Fixed
 
 - **`backup-freshness-collect.sh` / `check_backup_freshness.sh`**: a backup that
