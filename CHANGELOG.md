@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `config-sources.conf` maps `deployer.crunchtools.com` to the `deployer` repo.
+  It was UNMAPPED, so nothing was comparing the deployed unit and registry
+  against a second git home — and "we looked and found nothing" reads the same
+  as "nobody ever looked".
+
+### Fixed
+- The reference copies under `deploy/` match what is deployed again.
+  `deploy/nagios/deployer.cfg` still carried the 8.x `notes` text, which
+  described verdicts 9.0.0 changed, and
+  `deploy/systemd/nagios-agent.crunchtools.com.service` was missing the
+  read-only deployer-state mount the Deployer check needs. Both were reported
+  as divergent by this repo's own config-drift check, which is the check doing
+  its job.
+
+### Added
 - A **Linux MCP Server** service on gloval (RT #1568), watching the
   linux-mcp-server unit that is the Josui Prime agent's administration path
   into that host. It reuses `check_service_running.sh` rather than adding a
