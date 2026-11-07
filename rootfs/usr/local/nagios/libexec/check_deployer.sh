@@ -42,9 +42,18 @@ fi
 
 # ---- holds ----
 
+# An absent hold directory means no holds have ever been placed, which is the
+# normal state. One that EXISTS but cannot be listed or traversed is a
+# different thing entirely: holds may be sitting in it unseen, and reporting OK
+# would be reporting a guess. That is UNKNOWN.
+if [ -e "$HOLD_DIR" ] && { [ ! -r "$HOLD_DIR" ] || [ ! -x "$HOLD_DIR" ] || [ ! -d "$HOLD_DIR" ]; }; then
+    echo "UNKNOWN - deployer hold directory $HOLD_DIR exists but cannot be listed: holds may be present and unseen"
+    exit 3
+fi
+
 holds=()
 oldest_age=0
-if [ -d "$HOLD_DIR" ] && [ -r "$HOLD_DIR" ]; then
+if [ -d "$HOLD_DIR" ]; then
     now=$(date +%s)
     for path in "$HOLD_DIR"/*; do
         [ -f "$path" ] || continue

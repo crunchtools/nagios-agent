@@ -173,3 +173,84 @@ def test_performance_data_carries_the_counts(tmp_path: Path, guard: Path) -> Non
     assert "held=1" in result.stdout
     assert "oldest_hold=" in result.stdout
     assert f";;{STALE_HOLD_SECONDS}" in result.stdout
+
+
+def test_an_unreadable_hold_directory_is_unknown(tmp_path: Path, guard: Path) -> None:
+    # An ABSENT hold directory is the normal state. One that exists and cannot
+    # be listed is different: holds may be sitting in it unseen, and OK would
+    # be a guess.
+    directory = state(tmp_path)
+    (directory / "hold").chmod(0o000)
+    try:
+        result = run(directory, guard)
+    finally:
+        (directory / "hold").chmod(0o755)
+    assert result.returncode == UNKNOWN
+    assert "unseen" in result.stdout
+
+
+def test_no_hold_directory_at_all_is_not_unknown(tmp_path: Path, guard: Path) -> None:
+    directory = tmp_path / "fresh"
+    directory.mkdir()
+    result = run(directory, guard)
+    assert result.returncode == OK
+
+
+# --- precedence, when more than one thing is wrong at once ---
+
+
+def test_no_guard_outranks_a_stale_hold(tmp_path: Path, no_guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=STALE_HOLD_SECONDS + 3600)
+    result = run(directory, no_guard)
+    assert result.returncode == CRITICAL
+    assert "nothing honours them" in result.stdout
+    assert "fleet updates are frozen" not in result.stdout
+
+
+def test_a_stale_hold_outranks_a_failed_rollback(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=STALE_HOLD_SECONDS + 3600)
+    write_status(directory, "rollback-failed")
+    result = run(directory, guard)
+    assert result.returncode == CRITICAL
+    assert "fleet updates are frozen" in result.stdout
+
+
+def test_a_failed_rollback_outranks_a_plain_hold(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory)
+    write_status(directory, "rollback-failed")
+    result = run(directory, guard)
+    assert result.returncode == CRITICAL
+    assert "rollback did not verify" in result.stdout
+
+
+def test_a_hold_outranks_a_merely_odd_last_outcome(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory)
+    write_status(directory, "refused")
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "deployer hold(s)" in result.stdout
+
+
+# --- the stale threshold's boundary ---
+
+
+def test_a_hold_at_exactly_the_threshold_is_stale(tmp_path: Path, guard: Path) -> None:
+    # The comparison is -ge, so the boundary itself is CRITICAL. Pinned, or a
+    # change to -gt would pass every other test.
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=STALE_HOLD_SECONDS + 1)
+    result = run(directory, guard)
+    assert result.returncode == CRITICAL
+    assert "fleet updates are frozen" in result.stdout
+
+
+def test_a_hold_just_under_the_threshold_is_only_a_warning(tmp_path: Path, guard: Path) -> None:
+    directory = state(tmp_path)
+    place_hold(directory, age_seconds=STALE_HOLD_SECONDS - 600)
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "fleet updates are frozen" not in result.stdout

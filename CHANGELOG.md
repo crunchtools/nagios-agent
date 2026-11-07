@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format follows
   file's age says nothing about whether a hold is current. Everything it reads
   is local, so this is a plain check and not a collector (constitution XVI).
 
+  Registered as `check_deployer` in the host NRPE pool (`nrpe-host.cfg`, port
+  5666 -- it reads the host, not a container) with the Nagios service
+  definition in `deploy/nagios/deployer.cfg`.
+
 ## [8.4.0] - 2026-11-06
 
 ### Fixed
