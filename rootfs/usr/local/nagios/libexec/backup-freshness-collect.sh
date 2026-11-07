@@ -169,8 +169,17 @@ monthly2-rotv|Monthly-2|200000000|file|rootsofthevalley.org/backups/all-database
 # CRITICAL is to show.
 pbs_inflight() {
     local out
-    out=$(curl -s --max-time 5 --unix-socket "$PBS_SOCK" "$PBS_API" 2>/dev/null) || { echo unknown; return; }
+    # --fail matters: without it curl exits 0 on an HTTP 4xx/5xx and hands back
+    # the error body, which contains no container name and so would read as a
+    # confident "nothing is running" rather than "I could not tell".
+    out=$(curl -s --fail --max-time 5 --unix-socket "$PBS_SOCK" "$PBS_API" 2>/dev/null) || { echo unknown; return; }
     [ -n "$out" ] || { echo unknown; return; }
+    # podman answers with a JSON array -- [] when nothing is up. Anything else
+    # (a proxy's HTML, a truncated body) is not an answer we can read.
+    case "$out" in
+        \[*) ;;
+        *) echo unknown; return ;;
+    esac
     case "$out" in
         *"\"/$PBS_PREFIX"*) echo yes ;;
         *)                   echo no  ;;
