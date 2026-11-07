@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `config-sources.conf` maps the last six services the check could reach but
+  nobody had claimed: the three `developer` seats, both GHA runners,
+  `mcp-gitlab`, and `selinux-local` as an explicit `none`. All six were
+  answered by the file's own rule — read the unit and see what image it pulls —
+  and the seats' `identity/CLAUDE.md` files were edited this week with nothing
+  comparing them to anything. `linux-mcp-server` is deliberately left out: it
+  is being added to `/srv` right now and mapping it would collide with that.
+
 ## [9.1.0] - 2026-11-07
 
 ### Added
