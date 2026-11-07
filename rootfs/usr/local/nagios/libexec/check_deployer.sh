@@ -20,7 +20,8 @@
 #
 # Verdicts:
 #   OK        no holds, and the auto-update hold guard is installed
-#   WARNING   a hold exists, or the deployer could not run at all
+#   WARNING   a hold exists, the deployer could not run at all, or its last
+#             outcome is one this check does not recognise
 #   CRITICAL  a hold exists but nothing honours it (the guard is gone);
 #             a hold has stood for 24h or more; or a rollback failed to verify
 #   UNKNOWN   the state directory cannot be read

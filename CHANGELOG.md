@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (constitution: Plugin Interface Versioning).** `check_deployer.sh`
+  gives a different verdict for two of the deployer's outcomes, and the Nagios
+  service definition on the server is a consumer of that interface, so this is
+  a MAJOR bump.
+
 ### Fixed
 - `check_deployer.sh` no longer warns about a ticket the deployer **refused**.
   A refusal is a decided state — the deployer exits 0 for one, and the stalled
