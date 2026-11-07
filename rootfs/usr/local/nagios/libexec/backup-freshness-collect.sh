@@ -73,16 +73,8 @@ ROTATIONS=${ROTATIONS:-pcloud:Backups/Rotations}
 # the dumps that have not been uploaded yet look exactly like dumps that do not
 # exist. That is what made Backup Freshness go CRITICAL every week until someone
 # acknowledged it into silence, which is worse than the alert (RT #1566).
-#
-# systemd cannot answer this: to the agent container systemctl is a chroot. The
-# podman socket is mounted though, and curl is in the image, so ask podman which
-# containers are up.
-#
-# Match the name PREFIX, not a name derived per rotation. The units name their
-# containers inconsistently -- pbs-server-weekly but pbs-server-monthly-1 -- and
-# a rotation added later should inherit this guard without touching this file.
-PBS_SOCK=${PBS_SOCK:-/run/podman/podman.sock}
-PBS_API=${PBS_API:-http://d/v1.41/containers/json}
+# The mechanics live in cl_producer_running (collector-lib.sh); PBS_PREFIX below
+# says which containers count as "still putting it there" for each mode.
 
 case "$MODE" in
     servers)  STATUS="$STATE_DIR/backup-freshness.status";          PBS_PREFIX=pbs-server ;;
@@ -160,36 +152,9 @@ monthly2-rotv|Monthly-2|200000000|file|rootsofthevalley.org/backups/all-database
 "
 
 # yes | no | unknown. Read ONCE, before the probes fork, so every item in a run
-# is judged against the same answer and one curl covers all of them.
-#
-# unknown is not no. A read that failed must never masquerade as a guard that
-# answered "nothing is running" -- that is the same mistake as treating an empty
-# ExecCondition as "no guard configured". So unknown falls through to MISSING:
-# a backup that really is gone is far more dangerous to hide than a false
-# CRITICAL is to show.
-pbs_inflight() {
-    local out
-    # --fail matters: without it curl exits 0 on an HTTP 4xx/5xx and hands back
-    # the error body, which contains no container name and so would read as a
-    # confident "nothing is running" rather than "I could not tell".
-    out=$(curl -s --fail --max-time 5 --unix-socket "$PBS_SOCK" "$PBS_API" 2>/dev/null) || { echo unknown; return; }
-    [ -n "$out" ] || { echo unknown; return; }
-    # podman answers with a JSON array -- [] when nothing is up. Require BOTH
-    # brackets: a body that opens with [ but never closes is a truncated read,
-    # and a truncated read that happened to drop the pbs entry would otherwise
-    # answer a confident "no". Checking only the opening bracket would leave
-    # this comment making a promise the code does not keep.
-    out=${out%"${out##*[![:space:]]}"}   # strip trailing whitespace/newlines
-    case "$out" in
-        \[*\]) ;;
-        *) echo unknown; return ;;
-    esac
-    case "$out" in
-        *"\"/$PBS_PREFIX"*) echo yes ;;
-        *)                   echo no  ;;
-    esac
-}
-INFLIGHT=$(pbs_inflight)
+# is judged against the same answer and one curl covers all of them. The guard
+# itself is cl_producer_running in collector-lib.sh, where it is unit-tested.
+INFLIGHT=$(cl_producer_running "$PBS_PREFIX")
 
 miss_result() { # what "not at the destination" means right now
     [ "$INFLIGHT" = yes ] && echo inflight || echo missing

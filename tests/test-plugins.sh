@@ -208,6 +208,34 @@ STUB_INSPECT='{"ExitCode":0}' expect "empty stream gives empty output" 0 "^$" an
 STUB_CREATE='{"cause":"no such container"}' STUB_INSPECT='' expect "exec that cannot be created exits 3" 3 "EXEC_ERROR: Cannot create exec" any -- px ctr true
 rm -rf "$XSTUBS"
 
+echo "=== cl_producer_running (in-flight guard, RT #1566) ==="
+# The guard the backup collector leans on, exercised directly: it is the piece
+# that decides whether "not at the destination" means MISSING or "still being
+# written". Through the plugin, yes/no/unknown cannot all be told apart (unknown
+# deliberately falls through to MISSING), so the boundaries are asserted here.
+( . "$LIBEXEC/collector-lib.sh"
+  pr() { # <desc> <expected> ; STUB_SOCK / STUB_SOCK_RC set by the caller
+      local got; got=$(cl_producer_running pbs-server)
+      if [ "$got" = "$2" ]; then echo "  PASS: $1"; else echo "  FAIL: $1 (got $got, want $2)"; fi
+  }
+  STUB_SOCK='[{"Names":["/pbs-server-weekly"]}]'                 pr "a matching container is running"            yes
+  STUB_SOCK='[{"Names":["/pbs-server-monthly-1"]}]'              pr "prefix matches a different name shape"       yes
+  STUB_SOCK='[]'                                                 pr "empty array means nothing is running"        no
+  STUB_SOCK='[{"Names":["/mcp-grafana"]}]'                       pr "unrelated containers mean no"                no
+  STUB_SOCK='[{"Names":["/pbs-personal-weekly"]}]'               pr "another prefix does not match"               no
+  STUB_SOCK='[{"Names":["/my-pbs-server-decoy"]}]'               pr "name must START with the prefix"             no
+  STUB_SOCK='[{"Names":["/pbs-server-weekly"]}]' STUB_SOCK_RC=22 pr "HTTP error status is unknown, not no"        unknown
+  STUB_SOCK=''                                                   pr "empty body is unknown"                       unknown
+  STUB_SOCK='<html>502 Bad Gateway</html>'                       pr "HTML error body is unknown"                  unknown
+  STUB_SOCK='[{"Names":["/pbs-server-weekly"'                    pr "truncated array is unknown, not yes"         unknown
+  STUB_SOCK='[{"Names":["/mcp-grafana"]},{"Nam'                  pr "truncated before the match is unknown"       unknown
+  STUB_SOCK='[{"Names":["/pbs-server-weekly"]}]
+'                                                                pr "trailing newline still parses"               yes
+) > "$STUBS/pr-out" 2>&1
+cat "$STUBS/pr-out"
+PASS=$((PASS + $(grep -c '^  PASS:' "$STUBS/pr-out")))
+FAIL=$((FAIL + $(grep -c '^  FAIL:' "$STUBS/pr-out")))
+
 echo "=== backup freshness: collector, status file, kick ==="
 # Both backup checks only read the status file backup-freshness-collect.sh
 # writes; the collector is driven here directly with a stubbed rclone. The

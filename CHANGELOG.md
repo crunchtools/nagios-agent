@@ -40,6 +40,12 @@ All notable changes to this project are documented here. The format follows
   Mode-isolated: a personal rotation running does not excuse a missing server
   dump, or the reverse.
 
+  The guard itself lives in `collector-lib.sh` as `cl_producer_running`, so any
+  collector whose inputs are written by a long job can use it, and so it can be
+  unit-tested directly: through the plugin, `unknown` and `no` cannot be told
+  apart (both fall through to MISSING by design), which is exactly where a
+  regression would hide.
+
 ### Added
 
 - **`check_deployer.sh`**: the holds the deploy robot
