@@ -12,8 +12,14 @@ All notable changes to this project are documented here. The format follows
   `mcp-gitlab`, and `selinux-local` as an explicit `none`. All six were
   answered by the file's own rule — read the unit and see what image it pulls —
   and the seats' `identity/CLAUDE.md` files were edited this week with nothing
-  comparing them to anything. `linux-mcp-server` is deliberately left out: it
-  is being added to `/srv` right now and mapping it would collide with that.
+  comparing them to anything. `linux-mcp-server` was left out of that pass
+  because it was being added to `/srv` at the time; it is mapped below.
+- `linux-mcp-server` mapped to `rhel10-bootc-server`, completing the set. The
+  bootc image ships its unit and its authorization policy, because `/usr` is
+  read-only on an image-mode host, so that is the repo a stale reference copy
+  would hide in — "ask what ships the service", as the file itself puts it.
+  Its nftables fence and env file are host-only and live in `/srv` alone
+  (RT #1568).
 
 ## [9.1.0] - 2026-11-07
 
