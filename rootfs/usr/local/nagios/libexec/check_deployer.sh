@@ -35,8 +35,12 @@ STATUS_FILE="$STATE_DIR/deployer.status"
 GUARD_UNIT="podman-auto-update.service"
 STALE_HOLD_SECONDS=$(( 24 * 60 * 60 ))
 
-if [ ! -d "$STATE_DIR" ] || [ ! -r "$STATE_DIR" ]; then
-    echo "UNKNOWN - deployer state directory $STATE_DIR is missing or unreadable"
+# -x as well as -r: a directory can be readable and not searchable, and then
+# the hold subdirectory cannot be reached at all. Without this the -e test
+# below reads as "no hold directory" and the check reports OK with holds
+# sitting unseen.
+if [ ! -d "$STATE_DIR" ] || [ ! -r "$STATE_DIR" ] || [ ! -x "$STATE_DIR" ]; then
+    echo "UNKNOWN - deployer state directory $STATE_DIR is missing, unreadable or not searchable"
     exit 3
 fi
 
@@ -70,7 +74,17 @@ fi
 
 # ---- the guard that honours them ----
 
-guard=$($SYSTEMCTL show -p ExecCondition --value "$GUARD_UNIT" 2>/dev/null)
+# The exit status matters as much as the output. An empty value means "no
+# ExecCondition", which this check treats as a serious finding -- but a FAILED
+# query is also empty, and reporting "the guard is missing" when the truth is
+# "systemd could not be asked" sends someone to the wrong file. The same
+# distinction the deployer itself makes between a failed property read and an
+# absent value.
+if ! guard_err=$($SYSTEMCTL show -p ExecCondition --value "$GUARD_UNIT" 2>&1); then
+    echo "UNKNOWN - cannot ask systemd about $GUARD_UNIT: $(echo "$guard_err" | head -1)"
+    exit 3
+fi
+guard=$guard_err
 
 # ---- the last run ----
 

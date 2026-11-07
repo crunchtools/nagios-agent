@@ -254,3 +254,49 @@ def test_a_hold_just_under_the_threshold_is_only_a_warning(tmp_path: Path, guard
     result = run(directory, guard)
     assert result.returncode == WARNING
     assert "fleet updates are frozen" not in result.stdout
+
+
+@pytest.fixture
+def broken_systemctl(tmp_path: Path) -> Path:
+    """A stub systemctl that fails, as it would with no system manager to ask."""
+    path = tmp_path / "systemctl-broken"
+    path.write_text(
+        '#!/bin/sh\necho "Failed to connect to bus: No such file or directory" >&2\nexit 1\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def test_a_failed_systemctl_query_is_unknown_not_a_missing_guard(tmp_path: Path, broken_systemctl: Path) -> None:
+    # An empty ExecCondition and a failed query both produce an empty value.
+    # Reporting "the guard is missing" for the second sends someone to the
+    # wrong file entirely.
+    result = run(state(tmp_path), broken_systemctl)
+    assert result.returncode == UNKNOWN
+    assert "cannot ask systemd" in result.stdout
+    assert "Failed to connect to bus" in result.stdout
+
+
+def test_a_failed_query_is_unknown_even_with_holds_present(tmp_path: Path, broken_systemctl: Path) -> None:
+    # Otherwise this would be the CRITICAL "nothing honours them", which is a
+    # claim the check cannot actually support here.
+    directory = state(tmp_path)
+    place_hold(directory)
+    result = run(directory, broken_systemctl)
+    assert result.returncode == UNKNOWN
+    assert "nothing honours them" not in result.stdout
+
+
+def test_a_state_directory_that_cannot_be_searched_is_unknown(tmp_path: Path, guard: Path) -> None:
+    # Readable but not searchable: the hold subdirectory cannot be reached, so
+    # "no holds" would be a guess.
+    directory = state(tmp_path)
+    place_hold(directory)
+    directory.chmod(0o444)
+    try:
+        result = run(directory, guard)
+    finally:
+        directory.chmod(0o755)
+    assert result.returncode == UNKNOWN
+    assert "not searchable" in result.stdout
