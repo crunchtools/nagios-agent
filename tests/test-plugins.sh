@@ -20,14 +20,21 @@ cat > "$STUBS/curl" <<'STUB'
 # STUB_SOCK answers every socket call, unless STUB_SOCK_TOKEN is set and the
 # URL contains it, in which case STUB_SOCK_ALT answers instead. Two containers
 # inspected in one plugin need two answers.
+#
+# STUB_SOCK_ALT_RC gives the matched call its own exit status, which is how a
+# LISTING THAT SUCCEEDS and an INSPECT THAT FAILS are told apart: a token of
+# the container id matches only the per-container URL, because the list is
+# `containers/json` with no id in it. Without that, STUB_SOCK_RC fails both and
+# the collector takes the keep-the-whole-previous-file path instead of the
+# per-container one.
 for a in "$@"; do
     if [ "$a" = "--unix-socket" ]; then
         url="${@: -1}"
         if [ -n "${STUB_SOCK_TOKEN:-}" ] && [ "${url#*$STUB_SOCK_TOKEN}" != "$url" ]; then
             printf '%s' "${STUB_SOCK_ALT:-}"
-        else
-            printf '%s' "${STUB_SOCK:-}"
+            exit "${STUB_SOCK_ALT_RC:-${STUB_SOCK_RC:-0}}"
         fi
+        printf '%s' "${STUB_SOCK:-}"
         exit "${STUB_SOCK_RC:-0}"
     fi
 done
@@ -726,9 +733,9 @@ STUB
 chmod +x "$STUBS/kick"
 ID=$(printf 'a%.0s' $(seq 64))
 OLD_TS=$(( $(date +%s) - 40 * 3600 ))
-ctr() { # <image-ref> <autoupdate> <digest>
-    printf '{"Id":"%s","Name":"svc","ImageName":"%s","ImageDigest":"%s","Config":{"Labels":{"io.containers.autoupdate":"%s"}}}' \
-        "$ID" "$1" "$3" "$2"
+ctr() { # <image-ref> <autoupdate> <digest> [deploy-marker]
+    printf '{"Id":"%s","Name":"svc","ImageName":"%s","ImageDigest":"%s","Config":{"Labels":{"io.containers.autoupdate":"%s","io.crunchtools.deploy":"%s"}}}' \
+        "$ID" "$1" "$3" "$2" "${4:-}"
 }
 quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}]}' "$1" "$2"; }
 # ddcol: one collector run; ddchk: judge its file; dd: both, from scratch
@@ -739,9 +746,9 @@ LATEST=quay.io/crunchtools/svc:latest
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") \
     expect "running digest matches Quay is OK" 0 "^DEPLOY DRIFT OK - 1/1 .*collected_age=" no -- dd
 STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
-    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale\. unmanaged \(no autoupdate label\): svc" no -- dd
+    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale, 0 contested\. unmanaged \(no autoupdate label\): svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
-    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" no -- dd
+    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale, 0 contested" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$(date +%s)") \
     expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
 expect "the grace is the plugin argument, applied at judging time" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- ddchk 0
@@ -753,11 +760,41 @@ STUB_SOCK=$(ctr quay.io/crunchtools/pbs:latest "" sha256:aa) \
     expect "one-shot pbs backup job is ignored" 0 "^DEPLOY DRIFT OK - 0/0 " no -- dd
 STUB_SOCK=$(ctr quay.io/crunchtools/developer:latest "" sha256:aa) \
     expect "a developer seat with no label is ignored, not unmanaged" 0 "^DEPLOY DRIFT OK - 0/0 " no -- dd
+# The deploy robot's own registry. A marked service deliberately carries no
+# autoupdate label -- it is deployed by ticket, verified, and rolled back on
+# failure -- so "behind the tag" is normal for it and reporting it as unmanaged
+# would leave a WARNING nobody could ever clear. Quay is not even asked, which
+# is why no STUB_DIRECT is set here.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) \
+    expect "a deployer-managed service is not unmanaged" 0 "^DEPLOY DRIFT OK - 0/0 containers run the image their tag points at, 1 deployed by ticket .*deployer=1" no -- dd
+# And it must not be let through on the image name: the marker is what counts,
+# so an unmarked container with the same image is still unmanaged.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
+    expect "the same image without the marker is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged" no -- dd
+# Both mechanisms owning one service is the onboarding mistake, and it is drift
+# rather than something to resolve silently in favour of either one.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) \
+    expect "both markers is contested, not deployer-managed" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 0 stale, 1 contested\\. contested \\(deployer marker AND autoupdate=registry\\): svc" no -- dd
+# A marker this check has never heard of is not a free pass out of auto-update.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa somethingelse) \
+    expect "an unrecognised marker value is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged" no -- dd
+# RETENTION FOR THE TWO NEW KINDS. A marked container never asks Quay, so its
+# only route to UNKNOWN is the INSPECT failing -- and when inspect fails the
+# labels cannot be read, so the previous answer is the only thing that stops a
+# deployer-managed service reading as unreadable every time the socket hiccups.
+# The listing still succeeds in both of these: the token matches only the
+# per-container URL.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) dd >/dev/null
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) STUB_SOCK_TOKEN=aaaa STUB_SOCK_ALT_RC=22 ddcol
+expect "an unreadable inspect keeps a DEPLOYER answer" 0 "^DEPLOY DRIFT OK - 0/0 .*deployer=1" no -- ddchk
+STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) dd >/dev/null
+STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) STUB_SOCK_TOKEN=aaaa STUB_SOCK_ALT_RC=22 ddcol
+expect "an unreadable inspect keeps a CONTESTED answer" 1 "^DEPLOY DRIFT WARNING - .*1 contested" no -- ddchk
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
     expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") dd >/dev/null
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 ddcol
-expect "an unreadable Quay keeps the last answer" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale" no -- ddchk
+expect "an unreadable Quay keeps the last answer" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale, 0 contested" no -- ddchk
 sed -i -E "/item=/s/seen=[0-9]+/seen=$(( $(date +%s) - 11000 ))/" "$DDSTAT"
 expect "an answer older than STALE counts as unreadable" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc\\(stale\\)" no -- ddchk
 STUB_SOCK_RC=7 expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" no -- dd

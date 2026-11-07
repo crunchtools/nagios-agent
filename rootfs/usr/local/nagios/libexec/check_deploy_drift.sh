@@ -19,6 +19,20 @@
 #              has on Quay, and Quay moved that tag more than GRACE_HOURS ago.
 #              Auto-update is failing. Fix: read the podman-auto-update.service
 #              journal.
+#   contested  the container carries BOTH io.crunchtools.deploy=deployer and
+#              io.containers.autoupdate=registry. Two mechanisms own the
+#              service: auto-update would put an unverified image live behind
+#              the deploy robot's back, and the robot would roll back something
+#              auto-update had just installed. Fix: drop one, in /srv and /etc.
+#
+# A container marked io.crunchtools.deploy=deployer and NOT labelled for
+# auto-update is counted as deployer-managed and is never drift. It is deployed
+# by ticket -- with a maintenance window, a health probe and one rollback -- so
+# "behind what the tag points at now" is its normal state rather than a defect,
+# and check_deployer.sh is what watches it. The marker is a label on the
+# container and not a list of images in this file on purpose: the robot's
+# registry grows one service at a time, and a check that needed editing for
+# each one would be a check that was wrong in between.
 #
 # An image pinned by digest (@sha256:) is a deliberate choice -- kagemusha pins
 # one so what it runs changes only when its unit does -- so it is counted in
@@ -91,7 +105,7 @@ esac
 
 now=$(date +%s)
 grace=$((GRACE_HOURS * 3600))
-unmanaged=""; stale=""; unknown=""; clean=0; pinned=0
+unmanaged=""; stale=""; contested=""; unknown=""; clean=0; pinned=0; deployer=0
 
 while IFS= read -r line; do
     kind=$(cl_field kind "$line"); name=$(cl_field name "$line")
@@ -107,6 +121,8 @@ while IFS= read -r line; do
         BEHIND)    if [ $(( now - ${since:-0} )) -lt "$grace" ]; then clean=$((clean + 1)); else stale="$stale $name"; fi ;;
         PINNED)    pinned=$((pinned + 1)) ;;
         UNMANAGED) unmanaged="$unmanaged $name" ;;
+        DEPLOYER)  deployer=$((deployer + 1)) ;;
+        CONTESTED) contested="$contested $name" ;;
         UNKNOWN)   unknown="$unknown $name" ;;
     esac
 # `-t '='`, not `-t=`: GNU sort reads the fused form as the separator '=',
@@ -118,15 +134,17 @@ done < <(grep '^DDRIFT item=' <<< "$CL_RAW" | sort -t '=' -k5)
 
 n_unmanaged=$(printf '%s' "$unmanaged" | wc -w)
 n_stale=$(printf '%s' "$stale" | wc -w)
+n_contested=$(printf '%s' "$contested" | wc -w)
 n_unknown=$(printf '%s' "$unknown" | wc -w)
-drift=$((n_unmanaged + n_stale))
+drift=$((n_unmanaged + n_stale + n_contested))
 total=$((drift + n_unknown + clean))
 
-perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0 collected_age=${CL_AGE}s;;${STALE}"
+perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 contested=${n_contested};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0 deployer=${deployer};;;0 collected_age=${CL_AGE}s;;${STALE}"
 
 detail=""
 [ -n "$unmanaged" ] && detail="${detail}unmanaged (no autoupdate label):${unmanaged}. "
 [ -n "$stale" ] && detail="${detail}stale (auto-update not applying):${stale}. "
+[ -n "$contested" ] && detail="${detail}contested (deployer marker AND autoupdate=registry):${contested}. "
 [ -n "$unknown" ] && detail="${detail}unreadable:${unknown}. "
 [ -n "$CL_KICKED" ] && detail="${detail}${CL_KICKED# }. "
 
@@ -140,12 +158,19 @@ if [ "$n_unknown" -gt $((total / 2)) ]; then
     exit $UNKNOWN
 fi
 
+# Said in the headline and not only in the perfdata: these are the services
+# that have LEFT auto-update for the deploy robot, and that count going back to
+# zero on its own would be the marker having been dropped from a unit -- the
+# one way this could quietly stop being true.
+managed=""
+[ "$deployer" -gt 0 ] && managed=", ${deployer} deployed by ticket"
+
 if [ "$drift" -eq 0 ]; then
-    echo "DEPLOY DRIFT OK - ${clean}/${total} containers run the image their tag points at | $perf"
+    echo "DEPLOY DRIFT OK - ${clean}/${total} containers run the image their tag points at${managed} | $perf"
     exit $OK
 fi
 
 blind=""
 [ "$n_unknown" -gt 0 ] && blind=", ${n_unknown} UNCHECKED"
-echo "DEPLOY DRIFT WARNING - ${drift}/${total} containers drifted: ${n_unmanaged} unmanaged, ${n_stale} stale${blind}. ${detail}| $perf"
+echo "DEPLOY DRIFT WARNING - ${drift}/${total} containers drifted: ${n_unmanaged} unmanaged, ${n_stale} stale, ${n_contested} contested${blind}. ${detail}| $perf"
 exit $WARNING

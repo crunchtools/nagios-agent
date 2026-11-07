@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `check_deploy_drift.sh` understands `io.crunchtools.deploy=deployer`. A
+  container carrying that marker and no auto-update label is counted as
+  **deployed by ticket** and is never drift: the deploy robot deploys it with a
+  maintenance window, a health probe and one rollback, so "behind what the tag
+  points at now" is its normal state, and `check_deployer.sh` is what watches
+  it. Without this, every service onboarded into the robot's registry would
+  have become a permanent `unmanaged` WARNING telling somebody to undo the
+  change — and a standing WARNING teaches the fleet to ignore a check, which is
+  the exact failure this one was written to catch.
+
+  A **positive marker on the container**, not another image-name exception in
+  the collector. The registry grows one service at a time, and a check that
+  needed editing for each one would be a check that was wrong in between.
+- A `contested` verdict: both `io.crunchtools.deploy=deployer` and
+  `io.containers.autoupdate=registry` on one container. That is the likely
+  mistake when onboarding, and it is worse than either mechanism alone —
+  auto-update would put an unverified image live behind the robot's back, and
+  the robot would roll back something auto-update had just installed. Reported
+  as drift rather than silently resolved in favour of one of them.
+- `STUB_SOCK_ALT_RC` in the plugin tests, which is what lets a **listing that
+  succeeds** and an **inspect that fails** be told apart. The previous stub
+  failed both at once, so the collector took the keep-the-whole-previous-file
+  path and the per-container retention of the two new kinds could not be tested
+  at all. Both new tests were checked by breaking the line they cover.
+- The OK headline says how many containers are deployed by ticket. That count
+  returning to zero on its own is the marker having been dropped from a unit,
+  which is the one way this could quietly stop being true.
+
 ## [9.2.0] - 2026-11-07
 
 ### Added
