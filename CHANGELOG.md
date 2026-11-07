@@ -8,12 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 - **BREAKING (constitution: Plugin Interface Versioning).** `check_deployer.sh`
-  gives a different verdict for two of the deployer's outcomes, and the Nagios
-  service definition on the server is a consumer of that interface, so this is
-  a MAJOR bump.
+  gives a different verdict for three of the deployer's outcomes — `refused`,
+  `rolled-back` and `rollback-failed` — and the Nagios service definition on
+  the server is a consumer of that interface, so this is a MAJOR bump.
 
 ### Fixed
-- The `rollback-failed` CRITICAL now requires its **hold to still stand**. A
+- The `rollback-failed` CRITICAL now requires **the hold that failure placed**
+  to still stand, matched by unit name against the status file's own `hold`
+  lines. "Any hold at all" would keep one service's stale failure critical
+  because another happened to be held. A
   rollback that does not verify always places a hold, so a `rollback-failed`
   outcome with nothing held means a person has already cleared it — and since
   the status file is rewritten only when a ticket runs, the alert otherwise

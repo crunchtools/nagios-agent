@@ -60,8 +60,16 @@ def place_hold(
     return path
 
 
-def write_status(state_dir: Path, outcome: str, whole: bool = True) -> None:
+def write_status(state_dir: Path, outcome: str, whole: bool = True, held: tuple[str, ...] = ()) -> None:
+    """The deployer's record of its last run, in the collector frame.
+
+    ``held`` is the units the run recorded as held. A rollback that did not
+    verify always records the hold it placed, and the check compares those
+    names against the live hold directory -- "any hold at all" would keep one
+    service's stale failure critical because another happens to be held.
+    """
     lines = [f"DEPLOYER generated={int(time.time())} outcome={outcome} detail=x"]
+    lines += [f"DEPLOYER hold unit={unit} ticket=1 revision=f since=1" for unit in held]
     if whole:
         lines.append("DEPLOYER end=1")
     (state_dir / "deployer.status").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -154,11 +162,23 @@ def test_a_could_not_run_outcome_is_a_warning(tmp_path: Path, guard: Path) -> No
 
 def test_a_failed_rollback_is_critical(tmp_path: Path, guard: Path) -> None:
     directory = state(tmp_path)
-    place_hold(directory)
-    write_status(directory, "rollback-failed")
+    unit = "acquacotta.crunchtools.com.service"
+    place_hold(directory, unit=unit)
+    write_status(directory, "rollback-failed", held=(unit,))
     result = run(directory, guard)
     assert result.returncode == CRITICAL
     assert "rollback did not verify" in result.stdout
+
+
+def test_another_services_hold_does_not_keep_a_stale_failure_critical(tmp_path: Path, guard: Path) -> None:
+    # The failed rollback was acquacotta's and its hold is gone. mcp-pcloud
+    # being held for its own reasons says nothing about acquacotta.
+    directory = state(tmp_path)
+    place_hold(directory, unit="mcp-pcloud.crunchtools.com.service")
+    write_status(directory, "rollback-failed", held=("acquacotta.crunchtools.com.service",))
+    result = run(directory, guard)
+    assert result.returncode == WARNING
+    assert "rollback did not verify" not in result.stdout
 
 
 def test_a_failed_rollback_whose_hold_was_cleared_is_over(tmp_path: Path, guard: Path) -> None:
@@ -260,8 +280,9 @@ def test_a_stale_hold_outranks_a_failed_rollback(tmp_path: Path, guard: Path) ->
 
 def test_a_failed_rollback_outranks_a_plain_hold(tmp_path: Path, guard: Path) -> None:
     directory = state(tmp_path)
-    place_hold(directory)
-    write_status(directory, "rollback-failed")
+    unit = "acquacotta.crunchtools.com.service"
+    place_hold(directory, unit=unit)
+    write_status(directory, "rollback-failed", held=(unit,))
     result = run(directory, guard)
     assert result.returncode == CRITICAL
     assert "rollback did not verify" in result.stdout
