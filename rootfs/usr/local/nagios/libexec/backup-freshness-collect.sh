@@ -174,10 +174,14 @@ pbs_inflight() {
     # confident "nothing is running" rather than "I could not tell".
     out=$(curl -s --fail --max-time 5 --unix-socket "$PBS_SOCK" "$PBS_API" 2>/dev/null) || { echo unknown; return; }
     [ -n "$out" ] || { echo unknown; return; }
-    # podman answers with a JSON array -- [] when nothing is up. Anything else
-    # (a proxy's HTML, a truncated body) is not an answer we can read.
+    # podman answers with a JSON array -- [] when nothing is up. Require BOTH
+    # brackets: a body that opens with [ but never closes is a truncated read,
+    # and a truncated read that happened to drop the pbs entry would otherwise
+    # answer a confident "no". Checking only the opening bracket would leave
+    # this comment making a promise the code does not keep.
+    out=${out%"${out##*[![:space:]]}"}   # strip trailing whitespace/newlines
     case "$out" in
-        \[*) ;;
+        \[*\]) ;;
         *) echo unknown; return ;;
     esac
     case "$out" in
