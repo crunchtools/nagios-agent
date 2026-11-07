@@ -27,6 +27,49 @@ EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 
 # ---- collector side ---------------------------------------------------------
 
+CL_SOCK=${CL_SOCK:-/run/podman/podman.sock}
+CL_PODMAN_API=${CL_PODMAN_API:-http://d/v1.41/containers/json}
+
+# cl_producer_running <container-name-prefix>: echoes yes | no | unknown
+#
+# For a collector whose inputs are written by a long-running job: while that job
+# is still writing, a thing that is not at the destination YET is not missing.
+# The backup collector learned this the hard way -- a weekly run moves ~15 GiB
+# in ~144k files over ten hours, so for most of Saturday it was calling
+# not-yet-uploaded dumps MISSING and the alert was acknowledged into silence
+# (RT #1566).
+#
+# systemd cannot answer this: to an agent container systemctl is a chroot. The
+# podman socket is mounted and curl is in the image, so ask podman instead.
+# Match a name PREFIX rather than an exact name: units name their containers
+# inconsistently (pbs-server-weekly but pbs-server-monthly-1), and a sibling
+# added later should inherit the guard without editing the caller.
+#
+# unknown is NOT no. A read that failed must never masquerade as an answer of
+# "nothing is running" -- the same mistake as treating an empty ExecCondition
+# as "no guard configured". Callers decide what unknown means for them; the
+# backup collector treats it as "report MISSING anyway", because hiding a
+# backup that is really gone is worse than showing a false CRITICAL.
+cl_producer_running() {
+    local prefix=$1 out
+    # --fail matters: without it curl exits 0 on an HTTP 4xx/5xx and returns the
+    # error body, which contains no container name and so reads as a confident no.
+    out=$(curl -s --fail --max-time 5 --unix-socket "$CL_SOCK" "$CL_PODMAN_API" 2>/dev/null) || { echo unknown; return; }
+    [ -n "$out" ] || { echo unknown; return; }
+    out=${out%"${out##*[![:space:]]}"}   # strip trailing whitespace/newlines
+    # Require BOTH brackets. podman answers with a JSON array, [] when nothing
+    # is up. A body that opens but never closes is a truncated read, and one
+    # that dropped the matching entry would otherwise answer a confident no.
+    case "$out" in
+        \[*\]) ;;
+        *) echo unknown; return ;;
+    esac
+    case "$out" in
+        *"\"/$prefix"*) echo yes ;;
+        *)               echo no  ;;
+    esac
+}
+
 # cl_lock <name>: take this collector's lock or exit. Exits 0 when another run
 # holds it (that run will write the file) and 3 when the state dir is unusable.
 # The detached exec discards stderr, so the message is for a run by hand; the

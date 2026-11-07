@@ -15,6 +15,8 @@
 # Verdicts, per sentinel, the same thresholds as before the split:
 #   Weekly-1   WARNING 9d,  CRITICAL 16d   (pbs Servers syncs Saturdays 04:00)
 #   Monthly-*  WARNING 70d, CRITICAL 100d  (the two rotations alternate months)
+#   UNCHECKED  a pbs run of this mode is still uploading, so an item that is
+#              not at the destination yet is not judged (RT #1566)
 #   CRITICAL   dump missing (rclone exit 3/4 or an empty listing), or below its
 #              size floor
 #   UNKNOWN    the status file is missing or older than STALE (2h): "collector
@@ -65,6 +67,10 @@ while IFS= read -r line; do
                 rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${floor}B), age ${age}d"
             fi ;;
         missing)   rank=$R_CRIT;      msg="$label: MISSING ($(cl_field path "$line"))" ;;
+        # A pbs run of this mode was still uploading when the collector looked,
+        # so "not there" says nothing yet. The collector normally substitutes the
+        # last real answer; this only surfaces for an item with no history.
+        inflight)  rank=$R_UNCHECKED; msg="$label: upload in progress ($(cl_field path "$line"))" ;;
         unchecked) rank=$R_UNCHECKED; msg=${line#* msg=} ;;
         *)         rank=$R_UNKNOWN;   msg=${line#* msg=} ;;
     esac

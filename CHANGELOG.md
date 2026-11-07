@@ -6,6 +6,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`backup-freshness-collect.sh` / `check_backup_freshness.sh`**: a backup that
+  is still uploading is no longer reported as MISSING (RT #1566).
+
+  A weekly Servers run moves ~15 GiB in ~144,000 files and takes over ten hours,
+  so for most of every Saturday the destination is half-written. The collector
+  had no idea the job producing its inputs was still running, so every dump that
+  rclone had not reached yet looked exactly like a dump that was gone, and the
+  check went CRITICAL every week. It was acknowledged rather than fixed, which
+  is the worse outcome: the backup alarm had been trained to mean nothing.
+
+  The collector now asks podman whether a run of its own mode is up, and reports
+  `result=inflight` instead of `missing`. `inflight` joins the existing
+  "could not look this time" path, so an item with history shows its last real
+  answer; only an item with no history reaches the plugin, which ranks it
+  UNCHECKED rather than CRITICAL.
+
+  systemd cannot answer this — to the agent container `systemctl` is a chroot —
+  but the podman socket is already mounted and `curl` is already in the image.
+  The guard matches the container name *prefix* (`pbs-server-*`,
+  `pbs-personal-*`) rather than deriving a name per rotation: the units name
+  their containers inconsistently (`pbs-server-weekly` but
+  `pbs-server-monthly-1`), and a rotation added later inherits the guard.
+
+  A podman socket that cannot be read yields `unknown`, which deliberately falls
+  through to MISSING. A read that failed must not masquerade as a guard that
+  answered "nothing is running" — the same mistake as treating an empty
+  `ExecCondition` as "no guard configured". Hiding a backup that is really gone
+  is worse than showing a false CRITICAL.
+
+  Mode-isolated: a personal rotation running does not excuse a missing server
+  dump, or the reverse.
+
+  The guard itself lives in `collector-lib.sh` as `cl_producer_running`, so any
+  collector whose inputs are written by a long job can use it, and so it can be
+  unit-tested directly: through the plugin, `unknown` and `no` cannot be told
+  apart (both fall through to MISSING by design), which is exactly where a
+  regression would hide.
+
 ### Added
 
 - **`check_deployer.sh`**: the holds the deploy robot
