@@ -334,6 +334,39 @@ within 6 "timed-out listing stays inside the collector budget"
 STUB_GONE=rt4.sql STUB_SLOW=feeds.db PROBE_T=1 BUDGET=8 \
     expect "MISSING outranks TIMEOUT" 2 "^BACKUPS CRITICAL - rt-db: MISSING .*\\[\\+1 more\\].*unknown=1 .*"$'\n'"rt-db: MISSING.*"$'\n'"mcp-feeds-db: TIMEOUT" any -- bf
 STUB_SIZE=10 expect "shrunken dump" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: TOO SMALL 10B" any -- bf
+
+# --- in-flight guard (RT #1566) -------------------------------------------
+# A weekly Servers run moves ~15 GiB in ~144k files over ~10 hours, so for most
+# of Saturday the destination is half-written and a not-yet-uploaded dump looks
+# exactly like a deleted one. Reporting those as MISSING is what made this check
+# cry CRITICAL every week until it was acknowledged into silence.
+PBS_UP='[{"Names":["/pbs-server-weekly"],"Image":"pbs"}]'
+PBS_MONTHLY='[{"Names":["/pbs-server-monthly-2"]}]'
+PBS_PERSONAL='[{"Names":["/pbs-personal-weekly"]}]'
+PBS_NONE='[{"Names":["/mcp-grafana"]},{"Names":["/proxy.crunchtools.com"]}]'
+
+STUB_GONE=rt4.sql STUB_SOCK="$PBS_UP" \
+    expect "a run is uploading: not-yet-there is UNCHECKED, not MISSING" 3 "^BACKUPS UNKNOWN - rt-db: upload in progress" any -- bf
+# Container names differ per rotation (pbs-server-weekly vs pbs-server-monthly-2),
+# so the guard matches the prefix and a new rotation inherits it.
+STUB_GONE=rt4.sql STUB_SOCK="$PBS_MONTHLY" \
+    expect "guard matches any pbs-server-* name shape" 3 "^BACKUPS UNKNOWN - rt-db: upload in progress" any -- bf
+# Mode isolation: a personal run says nothing about the servers destination.
+STUB_GONE=rt4.sql STUB_SOCK="$PBS_PERSONAL" \
+    expect "a personal run does not excuse a missing server dump" 2 "^BACKUPS CRITICAL - rt-db: MISSING" any -- bf
+STUB_GONE=rt4.sql STUB_SOCK="$PBS_NONE" \
+    expect "nothing running: still MISSING" 2 "^BACKUPS CRITICAL - rt-db: MISSING" any -- bf
+# A read that FAILED must not masquerade as a guard that answered "no run".
+# Hiding a backup that is really gone is worse than showing a false CRITICAL.
+STUB_GONE=rt4.sql STUB_SOCK_RC=7 \
+    expect "unreadable podman socket does not suppress MISSING" 2 "^BACKUPS CRITICAL - rt-db: MISSING" any -- bf
+STUB_GONE=rt4.sql STUB_SOCK="" \
+    expect "empty podman answer does not suppress MISSING" 2 "^BACKUPS CRITICAL - rt-db: MISSING" any -- bf
+# With a previous real answer on file the collector substitutes it, so a run in
+# flight shows last week's result rather than a gap.
+rm -f "$BSTAT"; scol                                   # one clean run: rt-db ok
+STUB_GONE=rt4.sql STUB_SOCK="$PBS_UP" scol             # now "missing" while uploading
+expect "in-flight keeps the last real answer" 0 "^BACKUPS OK - Weekly-1 15/15 fresh" any -- chk "$BF"
 T0=$SECONDS
 STUB_SLOW=Backups/Servers PROBE_T=2 BUDGET=3 expect "exhausted deadline leaves sentinels UNCHECKED" 3 "^BACKUPS UNKNOWN - [a-z0-9-]+: TIMEOUT .*, 19 unchecked;.*UNCHECKED \\(out of time\\)" any -- bf
 within 4 "exhausted deadline does not overrun"

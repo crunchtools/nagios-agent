@@ -67,9 +67,26 @@ HOST_FQDN=${HOST_FQDN:-$(cat /proc/sys/kernel/hostname 2>/dev/null)}
 BASE=${BASE:-pcloud:Backups/Servers/$HOST_FQDN}
 ROTATIONS=${ROTATIONS:-pcloud:Backups/Rotations}
 
+# An item that is not at the destination is only MISSING if nothing is still
+# putting it there. A weekly Servers run moves ~15 GiB in ~144k files and takes
+# TEN HOURS, so for most of every Saturday the destination is half-written and
+# the dumps that have not been uploaded yet look exactly like dumps that do not
+# exist. That is what made Backup Freshness go CRITICAL every week until someone
+# acknowledged it into silence, which is worse than the alert (RT #1566).
+#
+# systemd cannot answer this: to the agent container systemctl is a chroot. The
+# podman socket is mounted though, and curl is in the image, so ask podman which
+# containers are up.
+#
+# Match the name PREFIX, not a name derived per rotation. The units name their
+# containers inconsistently -- pbs-server-weekly but pbs-server-monthly-1 -- and
+# a rotation added later should inherit this guard without touching this file.
+PBS_SOCK=${PBS_SOCK:-/run/podman/podman.sock}
+PBS_API=${PBS_API:-http://d/v1.41/containers/json}
+
 case "$MODE" in
-    servers)  STATUS="$STATE_DIR/backup-freshness.status" ;;
-    personal) STATUS="$STATE_DIR/personal-backup-freshness.status" ;;
+    servers)  STATUS="$STATE_DIR/backup-freshness.status";          PBS_PREFIX=pbs-server ;;
+    personal) STATUS="$STATE_DIR/personal-backup-freshness.status"; PBS_PREFIX=pbs-personal ;;
     *) echo "usage: backup-freshness-collect.sh servers|personal" >&2; exit 3 ;;
 esac
 
@@ -142,6 +159,29 @@ monthly2-crunchtools|Monthly-2|15000000|file|crunchtools.com/backups/all-databas
 monthly2-rotv|Monthly-2|200000000|file|rootsofthevalley.org/backups/all-databases.sql
 "
 
+# yes | no | unknown. Read ONCE, before the probes fork, so every item in a run
+# is judged against the same answer and one curl covers all of them.
+#
+# unknown is not no. A read that failed must never masquerade as a guard that
+# answered "nothing is running" -- that is the same mistake as treating an empty
+# ExecCondition as "no guard configured". So unknown falls through to MISSING:
+# a backup that really is gone is far more dangerous to hide than a false
+# CRITICAL is to show.
+pbs_inflight() {
+    local out
+    out=$(curl -s --max-time 5 --unix-socket "$PBS_SOCK" "$PBS_API" 2>/dev/null) || { echo unknown; return; }
+    [ -n "$out" ] || { echo unknown; return; }
+    case "$out" in
+        *"\"/$PBS_PREFIX"*) echo yes ;;
+        *)                   echo no  ;;
+    esac
+}
+INFLIGHT=$(pbs_inflight)
+
+miss_result() { # what "not at the destination" means right now
+    [ "$INFLIGHT" = yes ] && echo inflight || echo missing
+}
+
 lsf() { # <mode> <path> <secs>: rclone alone, so its exit code reaches the caller
     if [ "$1" = file ]; then
         timeout "$3" "$RCLONE" --config "$CONF" lsf --files-only \
@@ -172,8 +212,8 @@ probe() { # writes one BKUP item line to $TMP/res/<label>
         tries=$((tries + 1))
         case $rc in
             0) [ -n "$out" ] && break
-               echo "$head seen=$(date +%s) result=missing floor=$min path=$rot/$path" > "$res"; return ;;
-            3|4) echo "$head seen=$(date +%s) result=missing floor=$min path=$rot/$path" > "$res"; return ;;
+               echo "$head seen=$(date +%s) result=$(miss_result) floor=$min path=$rot/$path msg=$label: not uploaded yet ($rot/$path)" > "$res"; return ;;
+            3|4) echo "$head seen=$(date +%s) result=$(miss_result) floor=$min path=$rot/$path msg=$label: not uploaded yet ($rot/$path)" > "$res"; return ;;
             124) fail="timeout floor=$min msg=$label: TIMEOUT after ${t}s ($rot/$path)" ;;
             *) fail="error floor=$min msg=$label: RCLONE ERROR (exit $rc): $(head -1 "$err" | tr -cd '\040-\176' | tr -d '|' | cut -c1-80)" ;;
         esac
@@ -212,7 +252,7 @@ collect_servers() {
             line=$(cat "$TMP/res/$label" 2>/dev/null)
             [ -n "$line" ] || line="BKUP item=$label rot=$rot seen=$START result=error floor=$min msg=$label: probe wrote nothing"
             case "$line" in
-                *" result=timeout "*|*" result=error "*|*" result=unchecked "*)
+                *" result=timeout "*|*" result=error "*|*" result=unchecked "*|*" result=inflight "*)
                     # Could not look this time: keep the last real answer if there is one.
                     prev=$(previous "^BKUP item=$label rot=$rot seen=[0-9]+ result=(ok|missing) " | head -1)
                     [ -n "$prev" ] && line=$prev ;;
