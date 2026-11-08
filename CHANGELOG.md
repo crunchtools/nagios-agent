@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The config-drift source map follows the Telegraf rename (tig#50):
+  `telegraf.crunchtools.com` is now `telegraf-host.crunchtools.com`, and
+  `telegraf-receiver.crunchtools.com` (the OTLP receiver for Trentina's call
+  traces, was `telegraf-otlp`) is mapped to `tig` instead of reported
+  unmapped. The reference `nrpe-ctr.cfg` carries the renamed
+  `check_ctr_{run,mem}_telegraf_host` and the new `_telegraf_receiver`
+  commands, matching what is deployed.
+
 ## [9.6.0] - 2026-11-08
 
 ### Added
