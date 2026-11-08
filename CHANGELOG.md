@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.6.1] - 2026-11-08
+
 ### Changed
 
 - The config-drift source map follows the Telegraf rename (tig#50):
