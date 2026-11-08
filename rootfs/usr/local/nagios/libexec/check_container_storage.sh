@@ -46,7 +46,11 @@
 EXEC=${EXEC:-/usr/local/nagios/libexec/podman_exec.sh}
 WARN_GB=${1:-24}
 CRIT_GB=${2:-36}
-shift 2 2>/dev/null
+# Shift only what is actually there. `shift 2` with one argument fails and
+# shifts nothing, which left that argument sitting in "$@" to be read as the
+# service list below: `check_container_storage.sh 30` would have watched a
+# service called "30" and found nothing.
+[ $# -gt 2 ] && shift 2 || shift $#
 ALERTED=${ALERTED:-"developer1 developer2 developer3"}
 CONTEXT=${CONTEXT:-"gha-runner-cached"}
 # An explicit list is the whole list: there is no way to say "and also keep the

@@ -1519,6 +1519,10 @@ CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
 # cache named explicitly does count -- the usage text says so.
 CS_developer1=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
     expect "an explicit service list replaces both sets" 1 "^CONTAINER STORAGE WARNING - sandbox images 20\.0G \(warn 10G\).*gha-runner-cached 17\.0G/30" any -- cs 10 36 developer1 gha-runner-cached
+# `shift 2` with a single argument shifts nothing, so that argument used to fall
+# through into the service list and the check watched a service named "30".
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
+    expect "a lone threshold argument is not read as a service" 1 "^CONTAINER STORAGE WARNING - sandbox images 9\.0G \(warn 8G\)" any -- cs 8
 rm -rf "$CSD"
 
 echo "=== Hermes probes (python unittest) ==="
