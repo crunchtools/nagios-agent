@@ -96,13 +96,27 @@ if [ -z "$markers" ]; then
 fi
 
 status=0; problems=(); total=0; fresh=0; worst=-1; newest=-1; hosts=""
-while IFS='|' read -r _ item host started finished rclone_exit; do
-    [ -z "$item" ] && continue
+# `started` is read into _ deliberately: only the end time and the rclone exit
+# are judged here. A marker's start time says when a run began, which tells you
+# nothing about whether it finished.
+while IFS='|' read -r _ item host _ finished rclone_exit; do
     total=$((total+1)); st=0; msg=""
 
-    case "$hosts" in *" $host "*) ;; *) hosts="$hosts $host ";; esac
+    # A line with no item name is a truncated or corrupt marker. Skipping it
+    # (as this did until Gatehouse caught it on #149) let a marker set of
+    # nothing but malformed lines come out as "OK - 0/0 items fresh" -- a
+    # monitoring check going green on no evidence, which is precisely how the
+    # micro-SD stayed unnoticed for months.
+    if [ -z "$item" ]; then
+        st=2; msg="malformed ColdCopy marker: no item name"
+        item="(unnamed)"
+    else
+        case "$hosts" in *" $host "*) ;; *) hosts="$hosts $host ";; esac
+    fi
 
-    if ! [[ $finished =~ ^[0-9]+$ && $rclone_exit =~ ^[0-9]+$ ]]; then
+    if [ "$st" -ne 0 ]; then
+        :
+    elif ! [[ $finished =~ ^[0-9]+$ && $rclone_exit =~ ^[0-9]+$ ]]; then
         st=2; msg="$item: unreadable marker"
     else
         age=$(( (NOW - finished) / 86400 ))
@@ -117,6 +131,13 @@ while IFS='|' read -r _ item host started finished rclone_exit; do
     [ "$st" -gt "$status" ] && status=$st
     if [ "$st" -eq 0 ]; then fresh=$((fresh+1)); else problems+=("$msg"); fi
 done <<< "$markers"
+
+# Belt to the malformed-line braces above: never return OK having judged nothing.
+# An OK with no items behind it is a check that has stopped checking.
+if [ "$total" -eq 0 ]; then
+    echo "COLD COPY CRITICAL - ColdCopy markers present at $BASE but none could be parsed | items=0 collected_age=${collected}s;;${STALE}"
+    exit 2
+fi
 
 case $status in 0) word=OK;; 1) word=WARNING;; *) word=CRITICAL;; esac
 hosts=$(echo "$hosts" | tr -s ' ' | sed 's/^ //;s/ $//;s/ /,/g')

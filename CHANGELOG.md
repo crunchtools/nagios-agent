@@ -50,6 +50,12 @@ All notable changes to this project are documented here. The format follows
   is however often Scott docks: three missed weeks is a trip, four is the
   micro-SD happening again.
 
+  **It will not return OK having judged nothing.** A marker line with no item
+  name is CRITICAL as a malformed marker rather than skipped, and a marker set
+  where nothing parsed at all is CRITICAL too. Skipping those produced
+  `OK - 0/0 items fresh`: a monitoring check going green on no evidence, which
+  is precisely how the micro-SD stayed unnoticed. Caught by Gatehouse on #149.
+
 ## [9.5.0] - 2026-11-08
 
 ### Added
