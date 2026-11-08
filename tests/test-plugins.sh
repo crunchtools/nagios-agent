@@ -1282,6 +1282,17 @@ else
         expect "minor CDN/Cache is WARNING" 1 "^WARNING - Cloudflare: Elevated cache errors \\[minor/investigating; CDN/Cache\\]" no -- cfg
     STUB_INC="{\"page\":{\"name\":\"Cloudflare\"},\"incidents\":[$DNS]}" \
         expect "major Authoritative DNS is CRITICAL" 2 "^CRITICAL .*Authoritative DNS failures" no -- cfg
+    # EXCLUDED_SCOPES: an environment we cannot be in stays OK even though
+    # Cloudflare filed it under a component we do depend on. The first is the
+    # verbatim incident that paged us for five hours on 2026-11-08.
+    FEDRAMP=$(cf_incident "Fedramp Customers have Delayed Purges" minor "CDN Cache Purge")
+    CHINA=$(cf_incident "China Network egress degraded" major "CDN/Cache")
+    STUB_INC="{\"incidents\":[$FEDRAMP]}" \
+        expect "FedRAMP-scoped purge delay stays OK" 0 "^OK - No incidents affecting our components .*1 unrelated: Fedramp Customers have Delayed Purges \\(out of scope\\)" no -- cfg
+    STUB_INC="{\"incidents\":[$CHINA]}" \
+        expect "China Network stays OK even at major impact" 0 "^OK - No incidents affecting our components .*out of scope" no -- cfg
+    STUB_INC="{\"incidents\":[$FEDRAMP,$CDN]}" \
+        expect "an out-of-scope incident does not mask a real one" 1 "^WARNING - Cloudflare: Elevated cache errors .*1 unrelated" no -- cfg
     STUB_INC_RC=6 expect "status page unreachable on a first run is UNKNOWN" 3 "^UNKNOWN - Cannot reach Cloudflare status API \\(curl_exit_6" no -- cfg
     STUB_INC='<html>gateway</html>' expect "non-JSON status page is UNKNOWN, not OK" 3 "^UNKNOWN - Cannot reach Cloudflare status API" no -- cfg
     STUB_INC="{\"incidents\":[$DNS]}" STUB_GQL="$(gql 1 0)" cfcol
