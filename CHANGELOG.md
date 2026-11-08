@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.5.0] - 2026-11-08
+
+### Added
+
+- `check_container_storage.sh` and the **Container Storage** service, watching
+  the nested podman image stores in `developer1-3` and `gha-runner-cached`.
+  Those stores held **1,190,137 files and 49.5 GiB** on 2026-11-08, mostly the
+  same image repeatedly — developer1 carried python-sdlc 0.5.3, 0.5.2, 0.5.1,
+  0.5.0 *and* 0.2.0 at 988 MB each — and that mass is what stopped the weekly
+  pbs `Servers` sync converging: it ran backwards, 93% to 92% over five hours,
+  because the CI runner builds while rclone walks it. pbs 2.5.0/2.5.1 took
+  those trees out of the backup and `container-storage-prune.service` now keeps
+  the newest two tagged images per repository.
+
+  This check is **not** that prune's trigger. The prune runs on its own clock;
+  an alert used as a cron only fires when the alert pipeline is healthy, and it
+  spends an agent's judgement on deterministic policy. A failed prune run is
+  Host Units Watch's business via the unit result. This watches the slower
+  truth nothing else notices — the stores climbing again because the prune
+  quietly stopped working.
+
+  24 GB warning / 36 GB critical on developer1-3 image bytes, which sat at
+  13.3 GB after the first real prune; at ~3 GB/day fleet-wide if the prune
+  dies, that is about three days to warning. `gha-runner-cached` is reported as
+  context and never counted — its unit calls it a "persistent layer cache" and
+  the 17.4 GiB is the point. Volumes are excluded too: developer1's store is
+  2.85 GB of images beside a 7.26 GB `crunchtools-hook-cache` volume that is
+  supposed to be big and would bury the signal.
+
+  Reads store metadata through `podman_exec.sh` rather than walking the
+  filesystem — about 2s for all four — so it stays in the fast pool without the
+  memory spike behind RT #1459. The `Images` row is selected by its `Type`, not
+  taken as the first number in the table: reading the volume row by accident
+  would treat developer1's 7.26 GB `crunchtools-hook-cache` as images and go
+  CRITICAL on a healthy store. `podman_exec.sh` reports failures as
+  `EXEC_ERROR:` on stdout and still exits 0, so the text is what decides — an
+  absent container is reported as idle, while a dead socket or an unparseable
+  table is UNKNOWN rather than silently looking like an idle service. That
+  UNKNOWN applies to the alerted services only: a cache we cannot read is
+  reported as `unreadable cache:` and leaves the verdict alone, because the
+  check already says it does not judge that store.
+
 ## [9.4.0] - 2026-11-08
 
 ### Fixed
