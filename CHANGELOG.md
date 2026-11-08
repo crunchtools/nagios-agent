@@ -6,6 +6,45 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.4.0] - 2026-11-08
+
+### Fixed
+- `check_cloudflare_global.sh` no longer pages on incidents confined to a
+  Cloudflare environment this account is not in. "Fedramp Customers have
+  Delayed Purges" held the check at WARNING for five hours on 2026-11-08 while
+  Cloudflare's own update on it read "Non-fedramp customers are not impacted."
+
+  The component filter could not catch this one. Cloudflare files
+  environment-scoped incidents under the ordinary public component names: the
+  `components[]` entry was a plain `CDN Cache Purge`, which we do depend on,
+  and the `group_id` was the same value every component on the status page
+  carries. Nothing in the payload marks the scope, so the only signal is the
+  incident name, and that is now matched against `EXCLUDED_SCOPES` before the
+  component filter runs.
+
+  Listed there: FedRAMP (Cloudflare for Government is a physically separate
+  edge; these four zones are commercial Free plan) and China Network (needs the
+  Enterprise add-on). The bar for that list is *categorically impossible for
+  this account*, not merely unlikely — regional scope is deliberately excluded,
+  because an incident "in Phoenix" still serves our visitors. An out-of-scope
+  incident is counted and named in the OK line, so it stays visible without
+  waking anyone, and it cannot mask a real incident filed alongside it.
+
+### Added
+- Cloudflare `Access` and `Zero Trust` are now alertable components. Re-auditing
+  the account against the status page turned up a gap the previous audit
+  (2026-09-29) predates: four self-hosted Access applications gate
+  `nagios.crunchtools.com`, `learn.fatherlinux.com`, `rt.fatherlinux.com` and
+  `dev.rootsofthevalley.org`, created 2026-10-10 and 2026-11-05. An Access
+  outage locks us out of Nagios, the wiki and RT, and the check would have
+  reported OK straight through it. Incidents land on either component name, so
+  both are listed.
+
+  `Zero Trust Dashboard` was considered and left out: losing it blocks policy
+  edits, not logins. The rest of the audit confirmed the existing list —
+  Email Routing stays off it because mail is MX'd to self-hosted
+  `mail.crunchtools.com`, not `route*.mx.cloudflare.net`.
+
 ## [9.3.1] - 2026-11-08
 
 ### Fixed
