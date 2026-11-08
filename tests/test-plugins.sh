@@ -325,6 +325,50 @@ STUB_KICK_RC=3 expect "failed kick is reported" 3 "collector could not be starte
 RCLONE=/nonexistent CONF=/dev/null expect "collector without rclone exits 3, writes nothing" 3 "not mounted" any -- "$COL" personal
 [ -e "$PSTAT" ] && { echo "  FAIL: collector wrote a status without rclone"; FAIL=$((FAIL + 1)); }
 expect "collector rejects an unknown mode" 3 "usage" any -- "$COL" bogus
+
+echo "=== check_cold_copy_freshness ==="
+# Same collector, same status file, same markers folder: pbs 2.6.0's ColdCopy
+# module writes ColdCopy| lines beside the Files| ones, so these share the
+# rclone stub above and only the judging differs.
+CC="$LIBEXEC/check_cold_copy_freshness.sh"
+cc() { rm -f "$PSTAT"; pcol; chk "$CC"; }
+# cold <age days> [rclone exit]: three items, as ColdCopy writes them
+cold() {
+    local now; now=$(date +%s)
+    for i in "Backups/BitWarden" "Backups/Servers" Documents; do
+        echo "ColdCopy|$i|breetai.dc2.crunchtools.com|0|$((now - $1 * 86400))|${2:-0}"
+    done
+}
+STUB_MARKERS="$(cold 0)" expect "all three fresh" 0 "^COLD COPY OK - 3/3 items fresh on breetai.dc2.crunchtools.com .*problems=0" no -- cc
+STUB_MARKERS="$(cold 11)" expect "past warn" 1 "^COLD COPY WARNING .*Documents: aging 11d \\(warn 10d\\)" any -- cc
+STUB_MARKERS="$(cold 25)" expect "past crit" 2 "^COLD COPY CRITICAL .*Documents: STALE 25d \\(crit 24d\\)" any -- cc
+STUB_MARKERS="$(cold 9)" expect "just inside warn" 0 "^COLD COPY OK - 3/3 items fresh" any -- cc
+STUB_MARKERS="$(cold 0 7)" expect "fresh but failed sync is CRITICAL" 2 "^COLD COPY CRITICAL .*last run FAILED \\(rclone exit 7\\)" any -- cc
+STUB_MARKERS="$(cold 0 | sed 's#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|oops|0#')" \
+    expect "garbled marker" 2 "^COLD COPY CRITICAL .*Documents: unreadable marker" any -- cc
+
+# The Gatehouse finding on #149: an unnamed item used to be skipped with
+# `continue`, so a marker set of nothing but malformed lines left total at 0 and
+# status at 0 and printed "OK - 0/0 items fresh". A monitoring check going green
+# on no evidence is how the micro-SD it replaced stayed broken for months, so
+# these two are the point of this whole plugin, not edge cases.
+STUB_MARKERS="ColdCopy||breetai.dc2.crunchtools.com|0|$(date +%s)|0" \
+    expect "a marker set of only malformed lines is never OK" 2 "^COLD COPY CRITICAL .*malformed ColdCopy marker: no item name" any -- cc
+STUB_MARKERS="$(cold 0; echo "ColdCopy||breetai.dc2.crunchtools.com|0|$(date +%s)|0")" \
+    expect "one malformed among good ones still fails" 2 "^COLD COPY CRITICAL - 3/4 items fresh .*malformed ColdCopy marker" any -- cc
+
+# A drive nobody plugged in leaves the Files| markers fresh and no ColdCopy
+# marker at all. That is the condition this service exists to catch.
+STUB_MARKERS="$(markers 2 40)" \
+    expect "Files markers but no ColdCopy marker is CRITICAL" 2 "^COLD COPY CRITICAL - no ColdCopy marker .*never run, or the drive has not been plugged in" any -- cc
+STUB_MARKERS="$(cold 0)" STUB_RCLONE_RC=1 expect "failed read is not judged on partial output" 2 "^COLD COPY CRITICAL - cannot read markers .*rclone exit 1" any -- cc
+STUB_MARKERS="" expect "empty folder is CRITICAL" 2 "^COLD COPY CRITICAL - cannot read markers" any -- cc
+STUB_MARKERS="" STUB_RCLONE_RC=124 expect "first-ever read timing out is UNKNOWN" 3 "^COLD COPY UNKNOWN - collector timed out" any -- cc
+rm -f "$PSTAT"; STUB_MARKERS="$(cold 0)" pcol; age_file "$PSTAT" 7300
+expect "status older than 2h is UNKNOWN collector stale" 3 "^COLD COPY UNKNOWN - collector stale: last collection 2h" yes -- chk "$CC"
+rm -f "$PSTAT"
+expect "missing status file is UNKNOWN and starts the collector" 3 "^COLD COPY UNKNOWN - collector stale: no status file" yes -- chk "$CC"
+
 rm -rf "$RSTUBS"
 
 echo "=== check_backup_freshness ==="

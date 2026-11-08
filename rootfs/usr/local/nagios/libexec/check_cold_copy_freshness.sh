@@ -132,13 +132,12 @@ while IFS='|' read -r _ item host _ finished rclone_exit; do
     if [ "$st" -eq 0 ]; then fresh=$((fresh+1)); else problems+=("$msg"); fi
 done <<< "$markers"
 
-# Belt to the malformed-line braces above: never return OK having judged nothing.
-# An OK with no items behind it is a check that has stopped checking.
-if [ "$total" -eq 0 ]; then
-    echo "COLD COPY CRITICAL - ColdCopy markers present at $BASE but none could be parsed | items=0 collected_age=${collected}s;;${STALE}"
-    exit 2
-fi
-
+# No `total -eq 0` guard here, deliberately. $markers is non-empty by this point
+# and `<<<` appends a newline, so the loop always reads at least one line and
+# total is always at least 1 -- such a guard would be dead code that the next
+# reader would trust. What keeps this check from going green on nothing is the
+# malformed-marker branch above, which counts an unnamed item and calls it
+# CRITICAL, and the test for exactly that case in tests/test-plugins.sh.
 case $status in 0) word=OK;; 1) word=WARNING;; *) word=CRITICAL;; esac
 hosts=$(echo "$hosts" | tr -s ' ' | sed 's/^ //;s/ $//;s/ /,/g')
 echo "COLD COPY $word - $fresh/$total items fresh on ${hosts:-unknown} (newest ${newest}d, worst ${worst}d)${kicked} | worst_age=${worst}d;$WARN;$CRIT newest_age=${newest}d;; items=$total problems=${#problems[@]} collected_age=${collected}s;;${STALE}"
