@@ -856,6 +856,28 @@ expect "rival copy that matches is OK (duplicate)" 0 "^CONFIG DRIFT OK - 1 deplo
 rival 'listen 8080'
 expect "divergent rival copy is WARNING" 1 "^CONFIG DRIFT WARNING - 1/1 deployed config file\\(s\\) have a divergent second git home\\. divergent: rival/deploy/app.conf" no -- cd_
 CONFIG_DRIFT_MAX_DIVERGENT=1 expect "the ratchet stays in the plugin" 0 "^CONFIG DRIFT OK - 1 divergent, at or under the ratchet of 1" no -- cdchk
+# A VCS ignore list is not configuration. A repo's .gitignore names build
+# output and editor droppings; the one beside a service's config names runtime
+# state that must not be committed. They describe different trees and are MEANT
+# to differ, so comparing them reports drift that can never be resolved -- and
+# a WARNING nobody can clear teaches the fleet to ignore the check.
+#
+# divergent=0 is what proves the skip, not the file count: the deployed tally
+# comes from the fingerprint collector and still counts .gitignore as a file
+# present on disk, which changes no verdict. Without the skip this same
+# fixture reports divergent=1 and goes WARNING, because the two ignore lists
+# are written to differ.
+rival 'listen 80'
+printf 'build/\n' > "$CW/gh/org/rival/.gitignore"
+git -C "$CW/gh/org/rival" add -A; git -C "$CW/gh/org/rival" commit -qm ignore
+printf '*.sock\n' > "$CW/srv/svc/config/.gitignore"
+git -C "$CW/srv" add -A; git -C "$CW/srv" commit -qm srvignore
+git -C "$CW/srv" update-ref refs/remotes/origin/master HEAD
+expect ".gitignore is not configuration and is never compared" 0 "^CONFIG DRIFT OK - 2 deployed config file\\(s\\), none with a divergent second git home \\|.*divergent=0;" no -- cd_
+rm -f "$CW/srv/svc/config/.gitignore"
+git -C "$CW/srv" add -A; git -C "$CW/srv" commit -qm rmignore
+git -C "$CW/srv" update-ref refs/remotes/origin/master HEAD
+rival 'listen 8080'
 echo 'listen 81' > "$CW/srv/svc/config/app.conf"
 expect "unpublished AND divergent is CRITICAL" 2 "^CONFIG DRIFT CRITICAL - 1 deployed file\\(s\\) differ from origin/master AND from a rival git home" no -- cd_
 echo 'listen 80' > "$CW/srv/svc/config/app.conf"

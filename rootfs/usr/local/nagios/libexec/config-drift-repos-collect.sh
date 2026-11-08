@@ -256,8 +256,14 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
     repos=${RIVAL[$svc]:-}
     [ -n "$repos" ] && [ "$repos" != none ] || continue
 
-    # A build file is not configuration.
-    case "$base" in Containerfile|Dockerfile|.containerignore) continue ;; esac
+    # A build file is not configuration. Neither is a VCS ignore list: a
+    # repo's .gitignore names build output and editor droppings, while the one
+    # beside a service's config names runtime state that must not be
+    # committed. They describe different trees and are *meant* to differ, so
+    # comparing them reports drift that can never be resolved -- and a WARNING
+    # nobody can clear teaches the fleet to ignore the check. trentina's was
+    # the last standing divergence on the whole fleet for exactly this reason.
+    case "$base" in Containerfile|Dockerfile|.containerignore|.gitignore) continue ;; esac
 
     # Scored across every rival at once, so a file claimed by two repos is
     # reported once, against its single best counterpart. A repo never read
