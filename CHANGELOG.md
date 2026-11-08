@@ -37,7 +37,13 @@ All notable changes to this project are documented here. The format follows
 
   Reads store metadata through `podman_exec.sh` rather than walking the
   filesystem — about 2s for all four — so it stays in the fast pool without the
-  memory spike behind RT #1459.
+  memory spike behind RT #1459. The `Images` row is selected by its `Type`, not
+  taken as the first number in the table: reading the volume row by accident
+  would treat developer1's 7.26 GB `crunchtools-hook-cache` as images and go
+  CRITICAL on a healthy store. `podman_exec.sh` reports failures as
+  `EXEC_ERROR:` on stdout and still exits 0, so the text is what decides — an
+  absent container is reported as idle, while a dead socket or an unparseable
+  table is UNKNOWN rather than silently looking like an idle service.
 
 ## [9.4.0] - 2026-11-08
 
