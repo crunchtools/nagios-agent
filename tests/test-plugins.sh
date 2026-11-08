@@ -1462,6 +1462,40 @@ STUB_EXEC='no container with name or ID "ctr"' STUB_EXEC_RC=3 \
 STUB_EXEC='something else entirely' STUB_EXEC_RC=0 \
     expect "an unrecognised probe result is UNKNOWN, not OK" 3 "^UNKNOWN - unexpected probe result from ctr" yes -- "$DK" ctr
 
+echo "=== check_container_storage ==="
+CS="$LIBEXEC/check_container_storage.sh"
+CSD="$(mktemp -d)"
+# Per-service stub: the shared podman_exec.sh stub answers every call the same,
+# and this check reads four different stores, so "one is down" needs its own.
+cat > "$CSD/exec" <<'STUB'
+#!/bin/bash
+svc=${1%%.*}
+var="CS_${svc//-/_}"
+val=${!var:-}
+[ -n "$val" ] || exit 1
+printf '[\n    {"Type":"Images","Total":%s,"Active":0,"RawSize":%s,"RawReclaimable":0,"TotalCount":%s,"Size":"x","Reclaimable":"x"},\n    {"Type":"Local Volumes","Total":1,"Active":0,"RawSize":7256352906,"TotalCount":1}\n]\n' "${val##*:}" "${val%%:*}" "${val##*:}"
+STUB
+chmod +x "$CSD/exec"
+cs() { EXEC="$CSD/exec" "$CS" "$@"; }
+G=1073741824
+# 3 GB of images in each sandbox is 9 GB alerted; the 17 GB runner cache and the
+# 7.26 GB volume in every store must stay out of that sum. Plain prefix
+# assignments, not env: expect is a shell function.
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
+    expect "images under warn are OK" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G" any -- cs
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
+    expect "the runner cache is reported but not counted" 0 "gha-runner-cached 17\.0G/30 \(cache, not counted\)" any -- cs
+CS_developer1=$((9*G)):12 CS_developer2=$((9*G)):12 CS_developer3=$((9*G)):12 \
+    expect "27G of images is WARNING and names the prune" 1 "^CONTAINER STORAGE WARNING - sandbox images 27\.0G \(warn 24G\), is container-storage-prune running" any -- cs
+CS_developer1=$((13*G)):18 CS_developer2=$((13*G)):18 CS_developer3=$((13*G)):18 \
+    expect "39G of images is CRITICAL" 2 "^CONTAINER STORAGE CRITICAL - sandbox images 39\.0G \(crit 36G\)" any -- cs
+CS_developer1=$((3*G)):4 CS_developer3=$((3*G)):4 \
+    expect "a sandbox that is down is skipped, named, and not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 6\.0G.*not running: developer2, gha-runner-cached" any -- cs
+expect "no store readable at all is UNKNOWN" 3 "^CONTAINER STORAGE UNKNOWN - no alerted store could be read" any -- cs
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
+    expect "thresholds are overridable" 1 "^CONTAINER STORAGE WARNING - sandbox images 9\.0G \(warn 8G\)" any -- cs 8 36
+rm -rf "$CSD"
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))
