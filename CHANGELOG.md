@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.3.1] - 2026-11-08
+
+### Fixed
+- `config-drift-repos-collect.sh` no longer compares a `.gitignore` against its
+  rival repo's. A repo's `.gitignore` names build output and editor droppings;
+  the one beside a service's config names runtime state that must not be
+  committed. They describe different trees and are *meant* to differ, so the
+  comparison reported a divergence that could never be resolved — and a WARNING
+  nobody can clear teaches the fleet to ignore the check, which is the exact
+  failure this one exists to catch. trentina's was the last standing divergence
+  on the whole fleet, and it was this.
+
+  Shipped as a release rather than left on master because the drift check
+  compares the plugins running on the host against the ones in the **released**
+  image, and `latest` only moves on a `v*` tag. Between the merge of #143 and
+  this tag, gloval ran the fixed collector while `quay.io/crunchtools/nagios-agent:latest`
+  still held the old one, so the agent correctly reported itself as drifted —
+  one unpublished plugin, honestly counted. The fix for that reading is the tag.
+
+### Changed
+- python-sdlc pre-commit hooks to v0.5.3 (#144).
+
 ## [9.3.0] - 2026-11-07
 
 ### Added
