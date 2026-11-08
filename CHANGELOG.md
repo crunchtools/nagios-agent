@@ -6,6 +6,50 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.6.0] - 2026-11-08
+
+### Added
+
+- `check_cold_copy_freshness.sh` and the **Cold Copy Freshness** service:
+  **the check the micro-SD never had.**
+
+  Until today the only copy of Scott's personal data outside the pCloud account
+  was a 512 GB micro-SD. It had been broken since at least 2026-11-02 — 628 GiB
+  of source against a 469 GiB card, full, contents owned by the wrong uid — and
+  nobody noticed for months, because nothing watched it. It was retired
+  2026-11-07 (RT#1547). Everything else was inside one account: `~/pCloudDrive`
+  is the primary store and the "backup" was pCloud to pCloud, with 11 of 15
+  server databases single-homed there, `mcp-memory` and `trentina` included.
+  pbs 2.6.0's `ColdCopy` module now copies all of it to a 4 TB drive, and this
+  service is what keeps that from rotting the same way. It is the point of the
+  exercise, not an accessory to it.
+
+  Costs no extra pCloud read: `backup-freshness-collect.sh` already reads that
+  whole markers folder with one `rclone cat`, so widening its filter from
+  `^Files|` to `^(Files|ColdCopy)\|` picks these up in the same run, and the
+  plugin judges the same `personal-backup-freshness.status` file as Personal
+  Backup Freshness.
+
+  **No item list in the plugin.** `check_personal_backup_freshness.sh` carries a
+  hard-coded `DIRECTORIES` and a warning that it MUST track `pbs.sh`, because a
+  name pbs no longer syncs leaves a marker that can never be refreshed and a
+  CRITICAL nobody can clear. `ColdCopy` discovers its items from the account at
+  runtime, so there is nothing here to drift: this judges whatever the marker
+  reports. The failure that replaces "stale name" is "no marker at all", which
+  is CRITICAL and is also exactly what a drive nobody plugged in looks like —
+  the intended alert, not a false one.
+
+  **It runs on gloval, not on the laptop holding the drive.** The drive is only
+  present when Scott docks and unlocks it, so a check beside it could only
+  report while it was already running. Reading the marker from pCloud means a
+  laptop that is off is the condition that alerts, and nothing here changes when
+  the drive moves to a dedicated host — the check follows the marker's hostname.
+
+  WARN 10d / CRIT 24d. The sync is triggered by unlocking the drive rather than
+  by a timer (pbs `systemd/breetai/cold-copy.sh` explains why), so the cadence
+  is however often Scott docks: three missed weeks is a trip, four is the
+  micro-SD happening again.
+
 ## [9.5.0] - 2026-11-08
 
 ### Added

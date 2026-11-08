@@ -113,7 +113,12 @@ collect_personal() {
             previous '^PBKUP marker='
         else
             echo "PBKUP generated=$START seen=$START rc=$rc"
-            printf '%s\n' "$markers" | tr -cd '\012\040-\176' | grep '^Files|' | sed 's/^/PBKUP marker=/'
+            # Both marker families live in the same folder and arrive in the same
+            # `rclone cat`, so ColdCopy costs no extra read: Files| from pbs's
+            # pCloud-to-pCloud rotations, ColdCopy| from the local-drive copy
+            # (pbs 2.6.0), judged by check_personal_backup_freshness.sh and
+            # check_cold_copy_freshness.sh respectively.
+            printf '%s\n' "$markers" | tr -cd '\012\040-\176' | grep -E '^(Files|ColdCopy)\|' | sed 's/^/PBKUP marker=/'
         fi
         echo "PBKUP end=1"
     } > "$TMP/status"
