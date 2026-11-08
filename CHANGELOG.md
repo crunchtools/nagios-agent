@@ -43,7 +43,10 @@ All notable changes to this project are documented here. The format follows
   CRITICAL on a healthy store. `podman_exec.sh` reports failures as
   `EXEC_ERROR:` on stdout and still exits 0, so the text is what decides — an
   absent container is reported as idle, while a dead socket or an unparseable
-  table is UNKNOWN rather than silently looking like an idle service.
+  table is UNKNOWN rather than silently looking like an idle service. That
+  UNKNOWN applies to the alerted services only: a cache we cannot read is
+  reported as `unreadable cache:` and leaves the verdict alone, because the
+  check already says it does not judge that store.
 
 ## [9.4.0] - 2026-11-08
 

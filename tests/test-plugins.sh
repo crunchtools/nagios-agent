@@ -1479,6 +1479,7 @@ case "$val" in
     ABSENT) echo "EXEC_ERROR: Cannot create exec in container $1"; exit 0 ;;
     ERROR)  echo "EXEC_ERROR: Get http://d/v5.0.0/libpod/_ping: connection refused"; exit 0 ;;
     JUNK)   echo "not a df table at all"; exit 0 ;;
+    BADNUM) printf 'Images|not-a-number|4\nContainers|0|0\n'; exit 0 ;;
     VOLFIRST:*) v=${val#VOLFIRST:}
             printf '%s\nImages|%s|%s\nContainers|0|0\n' "$vol" "${v%%:*}" "${v##*:}"; exit 0 ;;
     *)      printf 'Images|%s|%s\nContainers|0|0\n%s\n' "${val%%:*}" "${val##*:}" "$vol"; exit 0 ;;
@@ -1519,6 +1520,14 @@ CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
 # cache named explicitly does count -- the usage text says so.
 CS_developer1=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
     expect "an explicit service list replaces both sets" 1 "^CONTAINER STORAGE WARNING - sandbox images 20\.0G \(warn 10G\).*gha-runner-cached 17\.0G/30" any -- cs 10 36 developer1 gha-runner-cached
+# A present Images row with a non-numeric field is not the same as a missing
+# one, and both have to be UNKNOWN rather than counted as zero.
+CS_developer1=$((3*G)):4 CS_developer2=BADNUM CS_developer3=$((3*G)):4 \
+    expect "a malformed Images row is UNKNOWN" 3 "^CONTAINER STORAGE UNKNOWN - a store could not be read:.*unreadable: developer2 \(unparseable Images row" any -- cs
+# A cache we cannot read is reported, but it must not change the verdict: the
+# check already says it does not judge that store.
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=ERROR \
+    expect "an unreadable cache is reported but not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G.*unreadable cache: gha-runner-cached \(exec failed" any -- cs
 # `shift 2` with a single argument shifts nothing, so that argument used to fall
 # through into the service list and the check watched a service named "30".
 CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \

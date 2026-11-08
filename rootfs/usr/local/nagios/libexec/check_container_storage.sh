@@ -107,7 +107,11 @@ images_bytes() {
 
 gb() { awk -v b="$1" 'BEGIN{printf "%.1f", b/1073741824}'; }
 
-total=0; parts=""; perf=""; absent=""; errored=""; readable=0; rc=0
+# errored is only ever the ALERTED services. A context service we could not
+# read is reported but must not change the verdict: we already said we do not
+# judge it, so going UNKNOWN because its cache was unreachable would be an
+# alert about a store this check has no opinion on.
+total=0; parts=""; perf=""; absent=""; errored=""; ctx_errored=""; readable=0; rc=0
 for svc in $ALERTED; do
     images_bytes "$svc"; rc=$?
     if [ "$rc" -eq 0 ]; then
@@ -128,15 +132,16 @@ for svc in $CONTEXT; do
         parts="${parts:+$parts, }$svc $(gb "$IB_SIZE")G/$IB_COUNT (cache, not counted)"
         perf="${perf:+$perf }${svc}_images=${IB_SIZE}B ${svc}_count=$IB_COUNT"
     elif [ "$rc" -eq 2 ]; then
-        errored="${errored:+$errored, }$svc ($REASON)"
+        ctx_errored="${ctx_errored:+$ctx_errored, }$svc ($REASON)"
     else
         absent="${absent:+$absent, }$svc ($REASON)"
     fi
 done
 
 tail="$parts"
-[ -n "$absent" ]  && tail="${tail:+$tail; }idle: $absent"
-[ -n "$errored" ] && tail="${tail:+$tail; }unreadable: $errored"
+[ -n "$absent" ]      && tail="${tail:+$tail; }idle: $absent"
+[ -n "$errored" ]     && tail="${tail:+$tail; }unreadable: $errored"
+[ -n "$ctx_errored" ] && tail="${tail:+$tail; }unreadable cache: $ctx_errored"
 
 # Nothing measured, or a store we should be measuring could not be read: either
 # way the number below is not the truth, and saying OK would be a lie.
