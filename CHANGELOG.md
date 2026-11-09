@@ -6,6 +6,59 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.7.0] - 2026-11-09
+
+### Added
+
+- `check_backup_rotation_progress.sh`, `rotation-progress-collect.sh` and the
+  **Backup rotation progress** service: **a rotation that never finishes now
+  blocks OS updates for ever, and nothing was watching.**
+
+  RT #1594 made every pbs backup rotation hold a systemd block shutdown
+  inhibitor for the life of its run, so an OS update cannot reboot the host
+  mid-backup — it is refused and retried every 30 minutes until the rotation
+  finishes. Verified live: a rotation held an OS update off for over three
+  hours. That is the behaviour we wanted, and it introduced a coupling that
+  had no watcher: a wedged rotation holds the inhibitor indefinitely, silently.
+
+  Backup Freshness and Personal Backup Freshness cannot see it. They judge the
+  markers a rotation writes when it COMPLETES, so a run wedged at hour three is
+  byte-identical to a run that never started, and their thresholds are 16 and
+  100 days. A wedge surfaced a fortnight late, as staleness, never as
+  "something is stuck right now".
+
+  Neither elapsed time nor rclone's byte counter can judge it on its own.
+  `ServerBackups-Weekly-1` takes roughly ten hours normally and
+  `PersonalBackups-Weekly-1` sixteen minutes, so one clock is either blind or
+  pages every Saturday. And on 2026-11-09 a personal rotation whose mirror was
+  39 days stale sat at `22.978 GiB / 22.978 GiB, 100%, 0 B/s, ETA -`
+  byte-identical for two and a half hours, 4h20m into the run, inside a
+  `--delete-during` pass that `--stats-one-line` does not count. That run was
+  SLOW, not wedged. What proved it was CPU: about half a CPU-second a minute,
+  continuously, with steady memory. Host networking leaves no per-container
+  network counters to use instead.
+
+  So the verdict is on both, and a rotation is stuck only when NEITHER its byte
+  counter NOR its CPU time has moved — 45m for a personal rotation, 2h for a
+  server one. Either one moving is progress, and progress is silent.
+
+  CPU time is cumulative, so proving it stopped needs two samples. That is the
+  only reason there is a collector: not a slow read — every call is the local
+  podman socket — but a baseline. Sampling twice inside one check run was the
+  alternative, and at half a CPU-second a minute a 15-second in-check sample
+  can read zero on a bursty process; that check would flap, and a flapping
+  detector trains the operator to ignore it. Across a 45-minute window of
+  five-minute samples the same rotation accrues ~22 CPU-seconds.
+
+  WARNING on a stall, because a stuck backup blocking OS updates is not an
+  emergency. CRITICAL only when it is ALSO past its lifetime ceiling (12h
+  personal, 24h server): the run cannot finish and updates have been refused
+  for half a day. A run past the ceiling that is still moving warns.
+
+  It never kills or time-bounds a rotation. Bounding a run's lifetime kills a
+  backup that might be slow rather than stuck, which is the behaviour RT #1594
+  was filed to stop. Visibility is the job.
+
 ## [9.6.1] - 2026-11-08
 
 ### Changed
