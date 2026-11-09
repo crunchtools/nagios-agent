@@ -35,8 +35,16 @@ if [ ! -r "$CA" ]; then
     exit $UNKNOWN
 fi
 
+# curl's own diagnostic is KEPT, not discarded. Without it a timeout, a TLS
+# verification failure and a refused connection all arrive as the same "no
+# answer", which is the difference between "openbao is down", "the CA is wrong"
+# and "nothing is listening" -- three different things to go and do at 3am.
+# It goes to a file rather than into $body, because $body is parsed positionally
+# (last line is the HTTP code) and mixing stderr in would corrupt that.
+err=$(mktemp "${TMPDIR:-/tmp}/.openbao-check.XXXXXX" 2>/dev/null) || err=/dev/null
+trap 'rm -f "$err"' EXIT
 body=$(curl -sS --cacert "$CA" --max-time "$TIMEOUT" \
-        -w '\n%{http_code}' "$ADDR/v1/sys/health" 2>/dev/null)
+        -w '\n%{http_code}' "$ADDR/v1/sys/health" 2>"$err")
 code=$(printf '%s' "$body" | tail -1)
 json=$(printf '%s' "$body" | sed '$d')
 
@@ -49,7 +57,18 @@ field_str()  { printf '%s' "$json" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*
 init=$(field_bool initialized)
 sealed=$(field_bool sealed)
 ver=$(field_str version)
-perf="| sealed=${sealed:-U} http=${code:-000}"
+# PERFDATA MUST BE NUMERIC. Nagios perfdata values are numbers or U -- "true"
+# and "false" are neither, so `sealed=true` was never graphable and this check
+# had been presenting an ungraphable metric as a graphable one since it shipped
+# (found by Gatehouse on PR #158, confidence 95, 3/3 votes). 1 is sealed, 0 is
+# unsealed, U is "could not tell". The human-readable half of the output keeps
+# the words, because that is what gets read in an alert.
+case "$sealed" in
+    true)  sealed_num=1 ;;
+    false) sealed_num=0 ;;
+    *)     sealed_num=U ;;
+esac
+perf="| sealed=$sealed_num http=${code:-000}"
 
 case "$code" in
     200)
@@ -77,7 +96,16 @@ case "$code" in
         exit $CRITICAL
         ;;
     000|"")
-        echo "OPENBAO CRITICAL - no answer from $ADDR. Check systemctl status openbao.crunchtools.com. $perf"
+        # Name the transport failure rather than making someone re-run curl by
+        # hand: a timeout, a TLS verification error and a refused connection are
+        # three different things to go and do something about.
+        #
+        # It goes BEFORE $perf. Everything after the pipe is perfdata, so any
+        # prose appended after it is parsed as a metric and the whole perfdata
+        # string is discarded -- which would have cost the graph to add a
+        # diagnostic to the output.
+        why=$(tr -d '\r' < "$err" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-120)
+        echo "OPENBAO CRITICAL - no answer from $ADDR${why:+ - $why}. Check systemctl status openbao.crunchtools.com. $perf"
         exit $CRITICAL
         ;;
     *)

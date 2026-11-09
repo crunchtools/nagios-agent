@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [9.9.1] - 2026-11-09
 
+### Fixed
+
+- `check_openbao.sh` emitted `sealed=true` / `sealed=false` as perfdata. Nagios
+  perfdata values are numbers or `U`, so the one metric this check advertised as
+  graphable was never graphable — it has been like that since 9.9.0 shipped this
+  morning. Now 1 for sealed, 0 for unsealed, `U` when it cannot tell; the
+  human-readable half keeps the words, because that is what gets read in an
+  alert. Found by Gatehouse on #158.
+- `check_openbao.sh` discarded curl's stderr, so a timeout, a TLS verification
+  failure and a refused connection all arrived as the same "no answer" — three
+  different jobs, one message. The diagnostic is now included, and deliberately
+  **before** the pipe: everything after it is perfdata, so prose appended there
+  is parsed as a metric and the whole perfdata string is discarded. Adding a
+  diagnostic the naive way would have cost the graph. Both arms are tested and
+  mutation-tested.
+
 ### Changed
 
 - `openbao.crunchtools.com` keeps its `none` mapping, but for a different

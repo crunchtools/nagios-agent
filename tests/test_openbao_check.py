@@ -171,3 +171,77 @@ def test_perfdata_is_always_present(tmp_path: Path, ca: Path) -> None:
         result = run(ca, stub_curl(tmp_path, body, code))
         assert "| sealed=" in result.stdout, (body, code)
         assert "http=" in result.stdout, (body, code)
+
+
+@pytest.mark.parametrize(
+    ("body", "code", "expected"),
+    [
+        (HEALTHY, "200", "0"),
+        (SEALED, "503", "1"),
+        (UNINITIALISED, "501", "1"),
+        ("", "000", "U"),
+        ("not json at all", "200", "U"),
+    ],
+)
+def test_sealed_perfdata_is_numeric(tmp_path: Path, ca: Path, body: str, code: str, expected: str) -> None:
+    """Nagios perfdata values are numbers or U. `sealed=true` is neither.
+
+    This check shipped in 9.9.0 emitting `sealed=true` / `sealed=false`, so the
+    metric it advertised as graphable was never graphable at all. 1 is sealed,
+    0 is unsealed, U is "could not tell". The human half of the output keeps the
+    words, because that is what gets read in an alert -- which is why the two
+    halves are asserted separately here.
+    """
+    result = run(ca, stub_curl(tmp_path, body, code))
+    perf = result.stdout.split("|", 1)[1]
+    assert f"sealed={expected}" in perf, result.stdout
+    for word in ("sealed=true", "sealed=false"):
+        assert word not in perf, f"non-numeric perfdata: {result.stdout}"
+
+
+def test_the_human_half_still_says_true_or_false(tmp_path: Path, ca: Path) -> None:
+    """Making perfdata numeric must not make the alert text unreadable."""
+    result = run(ca, stub_curl(tmp_path, SEALED, "200"))
+    message = result.stdout.split("|", 1)[0]
+    assert "sealed=true" in message, result.stdout
+
+
+def test_a_transport_failure_names_itself(tmp_path: Path, ca: Path) -> None:
+    """A timeout, a TLS error and a refused connection are three different jobs.
+
+    Discarding curl's stderr made all of them read as the same "no answer".
+    """
+    directory = tmp_path / "bin"
+    directory.mkdir(exist_ok=True)
+    curl = directory / "curl"
+    curl.write_text(
+        "#!/bin/sh\nprintf 'curl: (60) SSL certificate problem: self-signed certificate\\n' >&2\n"
+        "printf '%s\\n%s' '' '000'\n",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
+    result = run(ca, directory)
+    assert result.returncode == CRITICAL
+    assert "SSL certificate problem" in result.stdout, result.stdout
+
+
+def test_the_diagnostic_does_not_land_inside_perfdata(tmp_path: Path, ca: Path) -> None:
+    """Everything after the pipe is perfdata.
+
+    Prose appended after it is parsed as a metric and the whole perfdata string
+    is discarded -- so adding a diagnostic to the output would have cost the
+    graph. The diagnostic belongs before the pipe.
+    """
+    directory = tmp_path / "bin"
+    directory.mkdir(exist_ok=True)
+    curl = directory / "curl"
+    curl.write_text(
+        "#!/bin/sh\nprintf 'curl: (28) Operation timed out\\n' >&2\nprintf '%s\\n%s' '' '000'\n",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
+    result = run(ca, directory)
+    message, perf = result.stdout.split("|", 1)
+    assert "timed out" in message, result.stdout
+    assert "timed out" not in perf, result.stdout
+    assert perf.split() == ["sealed=U", "http=000"], perf
