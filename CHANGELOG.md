@@ -6,6 +6,63 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.8.0] - 2026-11-09
+
+### Added
+
+- `check_mcp_tool.sh` and `mcp-probes.conf.example`: one real tool call per MCP
+  service, because liveness was never what broke (RT #1565). Every
+  `ctr-mcp-*` host had exactly three checks — container running, container
+  memory, MCP port — and all three passed for the entire 2026-11-07 mcp-gemini
+  outage, during which every tool returned `Gemini API error: Attempted to call
+  a sync close on an async stream`. The process was up and the socket accepted
+  connections. The outage was found by needing the tool.
+
+  The plugin opens a streamable-http session, calls ONE free read-only tool,
+  and asserts a regex against the result. The assertion is the load-bearing
+  part: that outage answered HTTP 200 with `isError` false and an error string
+  as its content, so a check confirming only that the server replied would have
+  stayed green throughout. `tests/test-plugins.sh` encodes that exact shape as a
+  regression test.
+
+  bash and curl only — the image has no python and no jq. Handles stateful
+  servers (session id, `notifications/initialized`) and the two stateless ones
+  that return neither, and deletes its session rather than leaking one into
+  every server on every interval.
+
+  The per-service tool, arguments, assertion and `local`/`upstream:<who>` scope
+  live in `mcp-probes.conf`, resolved from an opaque key — the
+  `check_google_oauth.sh` pattern, for the same two reasons: `nrpe-ctr.cfg` is
+  published and one probe carries a mail address, and NRPE command definitions
+  are a poor home for JSON and regex. The two servers needing a bearer token
+  get it from the target container's own environment through the podman socket,
+  so no credential is copied into `/srv`.
+
+  The scope tag is printed in the alert. The probe cannot distinguish our bug
+  from a third party's outage — an expired credential, a server bug and GitHub
+  being down are identical from here — so the tag is a declared fact that lets
+  the triaging agent route without reading the table.
+
+- `deploy/nagios/mcp-tool-calls.cfg`: the 23 `MCP tool call` service
+  definitions, on the `:5667` pool so probes blocking on a third-party API
+  cannot queue behind the host diagnostics. `check_interval 15`,
+  `retry_interval 3`; with `max_check_attempts 3` a transient blip needs about
+  six minutes of consecutive failure to page.
+
+- `nagios-agent-ctr.crunchtools.com.service` mounts `mcp-probes.conf` at
+  `/etc/nagios/mcp-probes.conf`.
+
+  Verified end-to-end via `check_nrpe` from the Nagios server, including the
+  failure branch: stopping `learn.fatherlinux.com` drove `ctr-mcp-wiki` /
+  `MCP tool call` to CRITICAL while container running, container memory and MCP
+  port all stayed OK, and restarting it recovered. The first live run also
+  found a failure the old checks never saw — mcp-gsc's Search Console OAuth is
+  expired, so every one of its tools has been erroring behind three green
+  checks.
+
+  Not covered: `ctr-trentina`. The gateway answers 410 Gone on `/mcp` without a
+  per-profile JWT, and every one of its backends is now probed individually.
+
 ## [9.7.1] - 2026-11-09
 
 ### Fixed
