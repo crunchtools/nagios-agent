@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format follows
   longer suffix still wins outright.
 - The source map lists `srv-secrets` (host-local, `none`) and
   `container-storage-prune` (`pbs`), which were reported unmapped.
+- The reference units in `deploy/systemd/` match what runs on gloval: both
+  require `srv-secrets@nagios-agent.crunchtools.com` and read their env file
+  from `/run/srv-secrets` (trentina#768).
 
 ## [9.7.0] - 2026-11-09
 
