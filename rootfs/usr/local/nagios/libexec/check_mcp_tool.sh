@@ -51,7 +51,8 @@ TIMEOUT="${MCP_PROBE_TIMEOUT:-12}"
 PAYLOAD_MAX="${MCP_PROBE_PAYLOAD_MAX:-65536}"
 PROTO="2025-06-18"
 
-OK=0; WARNING=1; CRITICAL=2; UNKNOWN=3
+# No WARNING state: a tool call either returns usable data or it does not.
+OK=0; CRITICAL=2; UNKNOWN=3
 
 die() { echo "UNKNOWN - $1"; exit $UNKNOWN; }
 crit() { echo "CRITICAL - $1"; exit $CRITICAL; }
