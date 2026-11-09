@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.7.1] - 2026-11-09
+
+### Fixed
+
+- Config drift no longer reports a file ambiguous when two candidates in the
+  same repo tie on path suffix and only one of them names the service. A tie
+  now goes to the candidate whose path contains the service's /srv directory
+  name, so tig's `deploy/telegraf-host/telegraf.conf` and
+  `deploy/telegraf-receiver/telegraf.conf` each match their own service. A
+  longer suffix still wins outright.
+- The source map lists `srv-secrets` (host-local, `none`) and
+  `container-storage-prune` (`pbs`), which were reported unmapped.
+- The reference units in `deploy/systemd/` match what runs on gloval: both
+  require `srv-secrets@nagios-agent.crunchtools.com` and read their env file
+  from `/run/srv-secrets` (trentina#768).
+
 ## [9.7.0] - 2026-11-09
 
 ### Added

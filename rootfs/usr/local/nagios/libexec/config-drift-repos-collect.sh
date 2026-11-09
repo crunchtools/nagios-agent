@@ -237,6 +237,13 @@ fi
 # Longest common trailing path suffix, in components. The deployed
 # config/temporal/config.yaml scores 2 against rootfs/etc/temporal/config.yaml
 # and 1 against .gemini/config.yaml.
+#
+# The score is doubled, and a candidate whose path names the service (its /srv
+# directory up to the first dot) gets one more, so a tie on the suffix goes to
+# the file that belongs to that service and a longer suffix still wins
+# outright. tig keeps deploy/telegraf-host/telegraf.conf and
+# deploy/telegraf-receiver/telegraf.conf; both score 1 against each deployed
+# config/telegraf.conf, and without the name they were reported ambiguous.
 suffix_score() {
     local -a a b
     local n=0 i j
@@ -269,12 +276,14 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
     # reported once, against its single best counterpart. A repo never read
     # has no cache entry and simply takes no part.
     best=0; best_path=""; best_sha=""; best_repo=""; ties=0
+    short=${svc%%.*}
     for repo in ${repos//,/ }; do
         [ -s "${CACHE}/${repo}.tree" ] || continue
         while read -r rsha rpath; do
             [ "${rpath##*/}" = "$base" ] || continue
             case "$rpath" in docs/*|tests/*|examples/*) continue ;; esac
-            score=$(suffix_score "$path" "$rpath")
+            score=$(( $(suffix_score "$path" "$rpath") * 2 ))
+            case "/$rpath/" in */"$short"/*) score=$(( score + 1 )) ;; esac
             if [ "$score" -gt "$best" ]; then
                 best=$score; best_path=$rpath; best_sha=$rsha; best_repo=$repo; ties=1
             elif [ "$score" -eq "$best" ] && [ "$best" -gt 0 ]; then
