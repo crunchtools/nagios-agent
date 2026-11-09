@@ -41,10 +41,14 @@ fi
 # and "nothing is listening" -- three different things to go and do at 3am.
 # It goes to a file rather than into $body, because $body is parsed positionally
 # (last line is the HTTP code) and mixing stderr in would corrupt that.
-err=$(mktemp "${TMPDIR:-/tmp}/.openbao-check.XXXXXX" 2>/dev/null) || err=/dev/null
-trap 'rm -f "$err"' EXIT
+# The fallback is an EMPTY err, never /dev/null. With err=/dev/null the EXIT
+# trap below runs `rm -f /dev/null`, and this check runs as root under NRPE --
+# that unlinks the system's null device and breaks every process that opens it.
+# Caught by Gatehouse at HIGH on PR #158 before it ever ran as root.
+err=$(mktemp "${TMPDIR:-/tmp}/.openbao-check.XXXXXX" 2>/dev/null) || err=
+trap 'if [ -n "$err" ]; then rm -f "$err"; fi' EXIT
 body=$(curl -sS --cacert "$CA" --max-time "$TIMEOUT" \
-        -w '\n%{http_code}' "$ADDR/v1/sys/health" 2>"$err")
+        -w '\n%{http_code}' "$ADDR/v1/sys/health" 2>"${err:-/dev/null}")
 code=$(printf '%s' "$body" | tail -1)
 json=$(printf '%s' "$body" | sed '$d')
 
@@ -104,7 +108,7 @@ case "$code" in
         # prose appended after it is parsed as a metric and the whole perfdata
         # string is discarded -- which would have cost the graph to add a
         # diagnostic to the output.
-        why=$(tr -d '\r' < "$err" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-120)
+        why=$(tr -d '\r' < "${err:-/dev/null}" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-120)
         echo "OPENBAO CRITICAL - no answer from $ADDR${why:+ - $why}. Check systemctl status openbao.crunchtools.com. $perf"
         exit $CRITICAL
         ;;

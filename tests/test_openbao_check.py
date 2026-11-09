@@ -23,6 +23,7 @@ environment, which is what makes it testable without touching the real one.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -245,3 +246,45 @@ def test_the_diagnostic_does_not_land_inside_perfdata(tmp_path: Path, ca: Path) 
     assert "timed out" in message, result.stdout
     assert "timed out" not in perf, result.stdout
     assert perf.split() == ["sealed=U", "http=000"], perf
+
+
+def test_a_failed_mktemp_never_removes_dev_null(tmp_path: Path, ca: Path) -> None:
+    """The fallback must be an EMPTY err, not /dev/null.
+
+    With `err=/dev/null` the EXIT trap runs `rm -f /dev/null`, and this check
+    runs as root under NRPE: that unlinks the system's null device and breaks
+    every process that opens it. Gatehouse caught it at HIGH on #158 before it
+    ever ran as root.
+
+    `mktemp` is shadowed by a shim that fails, so the fallback path is the one
+    under test. The assertion is on the SOURCE as well as the behaviour, because
+    the damage only happens as root and the test is not root -- running it here
+    would prove nothing either way.
+    """
+    directory = tmp_path / "bin"
+    directory.mkdir(exist_ok=True)
+    failing = directory / "mktemp"
+    failing.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    failing.chmod(0o755)
+    curl = directory / "curl"
+    curl.write_text(f"#!/bin/sh\nprintf '%s\\n%s' '{HEALTHY}' '200'\n", encoding="utf-8")
+    curl.chmod(0o755)
+
+    result = run(ca, directory)
+    assert result.returncode == OK, result.stdout + result.stderr
+    assert "OPENBAO OK" in result.stdout
+
+    # Check CODE, not prose. The comment above the fix names the bad form on
+    # purpose, so a blunt substring search over the whole file matches the
+    # explanation of the bug and reports it as the bug -- which is exactly what
+    # the first version of this assertion did.
+    code = [
+        line.split("#", 1)[0]
+        for line in CHECK.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    assigns_devnull = [line for line in code if re.search(r"\berr=/dev/null", line)]
+    assert not assigns_devnull, f"the fallback must not name /dev/null: {assigns_devnull}"
+    source = "\n".join(code)
+    assert 'rm -f "$err"' in source
+    assert 'if [ -n "$err" ]' in source, "the trap must not remove an unset path"

@@ -10,6 +10,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `check_openbao.sh` would have run `rm -f /dev/null` as root. Keeping curl's
+  diagnostic meant a temporary file, and the fallback when `mktemp` fails was
+  `err=/dev/null` — which the EXIT trap then removed. This check runs as root
+  under NRPE, so that unlinks the system's null device and breaks every process
+  that opens it. The fallback is an empty `err` now and the trap is guarded.
+  Caught by Gatehouse at HIGH on #158 before it ever ran as root — introduced
+  and fixed within the same PR.
+
 - `check_openbao.sh` emitted `sealed=true` / `sealed=false` as perfdata. Nagios
   perfdata values are numbers or `U`, so the one metric this check advertised as
   graphable was never graphable — it has been like that since 9.9.0 shipped this
