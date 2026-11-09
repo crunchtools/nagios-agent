@@ -39,6 +39,9 @@ for a in "$@"; do
     fi
 done
 printf '%s' "${@: -1}" > "$STUB_DIRECT_URL"
+# Opt-in full argv capture, for asserting a secret never reaches the command
+# line. Appends, so a plugin making several calls is fully covered.
+[ -n "${STUB_DIRECT_ARGS:-}" ] && printf '%s\n' "$@" >> "$STUB_DIRECT_ARGS"
 printf '%s' "${STUB_DIRECT:-}"
 exit "${STUB_DIRECT_RC:-0}"
 STUB
@@ -1819,6 +1822,186 @@ CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gh
 CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
     expect "a lone threshold argument is not read as a service" 1 "^CONTAINER STORAGE WARNING - sandbox images 9\.0G \(warn 8G\)" any -- cs 8
 rm -rf "$CSD"
+
+echo "=== check_mcp_tool ==="
+# Offline: the curl stub answers BOTH the initialize and the tools/call with
+# the same STUB_DIRECT, which is why each fixture below is a full HTTP response
+# -- header block (initialize reads the status line and the session id from it)
+# plus one SSE data line (the call reads its result from that).
+MT="$LIBEXEC/check_mcp_tool.sh"
+MTD="$(mktemp -d)"
+trap 'rm -rf "$STUBS" "$MTD"' EXIT
+cat > "$MTD/probes.conf" <<'CONF'
+# a comment, and a blank line, both of which must be skipped
+
+good|9001|list_things_tool||local|{}|thing_count
+tokened|9002|list_things_tool|some-ctr:SOME_TOKEN|local|{}|thing_count
+upstreamy|9003|list_things_tool||upstream:api.example.com|{}|thing_count
+alternation|9004|list_things_tool||local|{}|thing_count|other_shape
+withargs|9005|list_things_tool||local|{"repo":"x"}|thing_count
+noexpect|9006|list_things_tool||local|{}|
+badscope|9007|list_things_tool||sideways|{}|thing_count
+badport|notaport|list_things_tool||local|{}|thing_count
+CONF
+
+hdr_ok='HTTP/1.1 200 OK
+content-type: text/event-stream
+mcp-session-id: deadbeefcafe
+'
+hdr_stateless='HTTP/1.1 200 OK
+content-type: application/json
+'
+MCP_OK="${hdr_ok}
+data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"text\":\"{\\\"thing_count\\\":7}\",\"type\":\"text\"}],\"isError\":false}}"
+# The 2026-11-07 mcp-gemini shape: HTTP 200, a well-formed result, isError
+# FALSE, and an error string as the content. Everything except the assertion
+# says this server is healthy. This case is the whole reason the plugin exists.
+MCP_GEMINI="${hdr_ok}
+data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"text\":\"Gemini API error: Attempted to call a sync close on an async stream\",\"type\":\"text\"}],\"isError\":false}}"
+MCP_ISERROR="${hdr_ok}
+data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"text\":\"OAuth credentials expired or missing\",\"type\":\"text\"}],\"isError\":true}}"
+MCP_NORESULT="${hdr_ok}
+data: {\"jsonrpc\":\"2.0\",\"id\":2}"
+MCP_RPCERR="${hdr_ok}
+data: {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Unknown tool\"}}"
+MCP_HTTP500='HTTP/1.1 500 Internal Server Error
+content-type: text/plain
+
+upstream connect error'
+# No session id: the two stateless servers (mcp-memory, mcp-grafana) answer
+# plain JSON and never hand one back. They must still pass.
+MCP_STATELESS="${hdr_stateless}
+{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"text\":\"{\\\"thing_count\\\":7}\",\"type\":\"text\"}]}}"
+INSPECT_TOKEN='{"Config":{"Env":["PATH=/usr/bin","SOME_TOKEN=s3kr1t","HOME=/root"]}}'
+
+STUB_DIRECT="$MCP_OK" expect "a valid result passes" 0 \
+    "^OK - good \[local\]: list_things_tool returned a valid result" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_STATELESS" expect "a stateless server with no session id passes" 0 \
+    "^OK - good \[local\]" any -- "$MT" good "$MTD/probes.conf"
+# The regression test. Do not weaken it.
+STUB_DIRECT="$MCP_GEMINI" expect "200 + isError false + an error string is CRITICAL" 2 \
+    "^CRITICAL - good \[local\]: list_things_tool answered but the result does not match /thing_count/.*sync close on an async stream" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_ISERROR" expect "isError true is CRITICAL and quotes the text" 2 \
+    "^CRITICAL - good \[local\]: list_things_tool reported isError: OAuth credentials expired" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_NORESULT" expect "a reply with no result object is CRITICAL" 2 \
+    "^CRITICAL - good \[local\]: list_things_tool answered without a result object" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_RPCERR" expect "a JSON-RPC error is CRITICAL and quotes the message" 2 \
+    "^CRITICAL - good \[local\]: MCP initialize returned a JSON-RPC error: Unknown tool" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_HTTP500" expect "a non-2xx status is CRITICAL" 2 \
+    "^CRITICAL - good \[local\]: MCP initialize returned HTTP 500" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_OK" STUB_DIRECT_RC=7 expect "a transport failure is CRITICAL with the curl status" 2 \
+    "^CRITICAL - good \[local\]: MCP initialize failed on 127.0.0.1:9001 \(curl exit 7\)" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$MCP_OK" expect "an empty reply is CRITICAL" 2 \
+    "^CRITICAL - good \[local\]: list_things_tool returned an empty response" any -- env STUB_DIRECT= "$MT" good "$MTD/probes.conf"
+
+# The scope tag is what Kagetora triages on, so it must reach the output.
+STUB_DIRECT="$MCP_GEMINI" expect "the upstream scope tag is carried into the alert" 2 \
+    "^CRITICAL - upstreamy \[upstream:api\.example\.com\]" any -- "$MT" upstreamy "$MTD/probes.conf"
+# expect is the LAST field, so it may contain | for alternation.
+STUB_DIRECT="$MCP_OK" expect "an expect regex may contain alternation" 0 \
+    "^OK - alternation \[local\].*matched /thing_count\|other_shape/" any -- "$MT" alternation "$MTD/probes.conf"
+STUB_DIRECT="$MCP_OK" expect "a row with JSON arguments is parsed" 0 \
+    "^OK - withargs \[local\]" any -- "$MT" withargs "$MTD/probes.conf"
+
+# Tokens come from the target container's own env via the podman socket.
+STUB_SOCK="$INSPECT_TOKEN" STUB_DIRECT="$MCP_OK" expect "a bearer token is read from the container env" 0 \
+    "^OK - tokened \[local\]" any -- "$MT" tokened "$MTD/probes.conf"
+# UNKNOWN, not CRITICAL: a podman socket we cannot read is a fault in this
+# check, and blaming the MCP server for it would send someone the wrong way.
+STUB_SOCK='' STUB_DIRECT="$MCP_OK" expect "an unreadable token is UNKNOWN, not CRITICAL" 3 \
+    "^UNKNOWN - could not read \\\$SOME_TOKEN from container some-ctr" any -- "$MT" tokened "$MTD/probes.conf"
+
+# A Nagios plugin line reaches the Nagios log, the web UI, Hermes and Matrix.
+# The tool's own error text is kept because it is the most useful thing in the
+# page, so credential-shaped material in it must be redacted instead.
+leaky() {
+    printf '%s\n\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"text":"%s","type":"text"}],"isError":true}}' \
+        "HTTP/1.1 200 OK
+mcp-session-id: deadbeefcafe" "$1"
+}
+STUB_DIRECT="$(leaky 'upstream rejected: Authorization: Bearer ya29.A0ARrdaM-VERYSECRETVALUE')" \
+    expect "a bearer token in the tool error is redacted" 2 \
+    "reported isError: upstream rejected: Authorization: Bearer \[REDACTED\] *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'GET /v1/x?api_key=abcd1234efgh5678 failed')" \
+    expect "a credential query parameter is redacted" 2 \
+    "reported isError: GET /v1/x\?api_key=\[REDACTED\] failed *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMiJ9.abc')" \
+    expect "a JWT in the tool error is redacted" 2 \
+    "reported isError: bad token \[REDACTED-JWT\] *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'cannot reach postgres://user:hunter2@db:5432/x')" \
+    expect "a URL password is redacted" 2 \
+    "reported isError: cannot reach postgres://\[REDACTED-USERINFO\]@db:5432/x *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'github said ghp_AAAABBBBCCCCDDDDEEEEFFFFGGGG is bad')" \
+    expect "a provider token pattern is redacted" 2 \
+    "reported isError: github said \[REDACTED-TOKEN\] is bad *$" any -- "$MT" good "$MTD/probes.conf"
+# ...and the diagnostic value survives: the real mcp-gsc text must come through
+# intact, because that is what routed the 2026-11-09 alert correctly.
+STUB_DIRECT="$(leaky "Error calling tool 'list_sites_tool': OAuth credentials expired or missing. Re-authenticate by visiting: http://127.0.0.1:8017/auth")" \
+    expect "a benign error message is NOT mangled" 2 \
+    "reported isError: Error calling tool 'list_sites_tool': OAuth credentials expired or missing\. Re-authenticate by visiting: http://127\.0\.0\.1:8017/auth *$" any -- "$MT" good "$MTD/probes.conf"
+
+# The bearer token must never reach curl's argument list. This container runs
+# --pid=host, so anything that can read /proc/<pid>/cmdline could lift it out
+# of a running curl. Gatehouse caught this as CRITICAL on the first PR.
+ARGCAP="$MTD/argv"
+: > "$ARGCAP"
+STUB_SOCK="$INSPECT_TOKEN" STUB_DIRECT="$MCP_OK" STUB_DIRECT_ARGS="$ARGCAP" \
+    expect "a tokened probe still passes with the header in a file" 0 \
+    "^OK - tokened \[local\]" any -- "$MT" tokened "$MTD/probes.conf"
+ok_if "the token value never reaches curl argv" test -s "$ARGCAP"
+# ok_if runs its arguments as a command, and `!` is a shell keyword rather than
+# one, so the negation needs a real command to live in.
+absent_from() { ! grep -q "$1" "$2"; }
+ok_if "the token value is absent from curl argv" absent_from 's3kr1t' "$ARGCAP"
+ok_if "the auth header is passed as @file" grep -q '^@/' "$ARGCAP"
+# ...and the file it points at is gone once the plugin exits, and was private.
+hdrpath=$(grep -m1 '^@/' "$ARGCAP" | sed 's/^@//')
+ok_if "the header file is removed on exit" test ! -e "$hdrpath"
+
+# Table faults are UNKNOWN: the probe never ran, so nothing is known about the
+# server. A row with no assertion is the dangerous one -- it would pass on an
+# error string, which is the failure this plugin exists to catch.
+expect "a row with no expect regex is refused" 3 \
+    "^UNKNOWN - probe 'noexpect' has no expect regex" any -- "$MT" noexpect "$MTD/probes.conf"
+expect "a bad scope is refused" 3 \
+    "^UNKNOWN - probe 'badscope' scope must be 'local' or 'upstream:<who>'" any -- "$MT" badscope "$MTD/probes.conf"
+expect "a non-numeric port is refused" 3 \
+    "^UNKNOWN - probe 'badport' has a non-numeric port" any -- "$MT" badport "$MTD/probes.conf"
+expect "an unknown probe key is UNKNOWN" 3 \
+    "^UNKNOWN - no probe row for 'nosuchthing'" any -- "$MT" nosuchthing "$MTD/probes.conf"
+expect "a missing probe table is UNKNOWN" 3 \
+    "^UNKNOWN - probe table .* is missing or unreadable" any -- "$MT" good "$MTD/nope.conf"
+expect "no argument is UNKNOWN" 3 \
+    "^UNKNOWN - usage:" any -- "$MT"
+
+# The shipped table must satisfy the plugin's own validation: every row needs a
+# port, a tool, a scope and an assertion. A typo here is a check that silently
+# reports UNKNOWN for ever.
+SHIPPED="$HERE/../deploy/nagios-agent/mcp-probes.conf.example"
+rows=$(grep -vc '^[[:space:]]*#\|^[[:space:]]*$' "$SHIPPED")
+ok_if "the shipped probe table has rows" test "$rows" -gt 0
+bad=0
+while IFS= read -r row; do
+    case "$row" in ''|\#*) continue ;; esac
+    port=$(cut -d'|' -f2 <<<"$row"); tool=$(cut -d'|' -f3 <<<"$row")
+    scope=$(cut -d'|' -f5 <<<"$row"); exp=$(cut -d'|' -f7- <<<"$row")
+    case "$port" in ''|*[!0-9]*) echo "    bad port: $row"; bad=1 ;; esac
+    [ -n "$tool" ] || { echo "    no tool: $row"; bad=1; }
+    [ -n "$exp" ] || { echo "    no expect: $row"; bad=1; }
+    case "$scope" in local|upstream:?*) ;; *) echo "    bad scope: $row"; bad=1 ;; esac
+done < <(grep -v '^[[:space:]]*#' "$SHIPPED")
+ok_if "every shipped probe row is well formed" test "$bad" -eq 0
+# Every probe key needs an NRPE command, and every command a probe key.
+keys=$(grep -v '^[[:space:]]*#\|^[[:space:]]*$' "$SHIPPED" | cut -d'|' -f1 | sed 's/^mcp-//; s/-/_/g' | sort)
+cmds=$(grep -o 'command\[check_mcp_tool_[a-z_]*\]' "$HERE/../deploy/nagios-agent/nrpe-ctr.cfg" \
+       | sed 's/command\[check_mcp_tool_//; s/\]//' | sort)
+ok_if "every probe row has an NRPE command and vice versa" test "$keys" = "$cmds"
+# ...and a Nagios service definition, or the check exists and nobody runs it.
+svcs=$(grep -o 'check_mcp_tool_[a-z_]*' "$HERE/../deploy/nagios/mcp-tool-calls.cfg" \
+       | sed 's/check_mcp_tool_//' | sort)
+ok_if "every probe row has a Nagios service definition" test "$keys" = "$svcs"
+rm -rf "$MTD"
+trap 'rm -rf "$STUBS"' EXIT
 
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then

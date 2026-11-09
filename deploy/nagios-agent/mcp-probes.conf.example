@@ -1,0 +1,84 @@
+# =============================================================================
+# mcp-probes.conf — one real tool call per MCP service (RT #1565)
+# =============================================================================
+# Read by check_mcp_tool.sh. Deploy to:
+#   /srv/nagios-agent.crunchtools.com/config/mcp-probes.conf
+# Mounted into nagios-agent-ctr at /etc/nagios/mcp-probes.conf.
+#
+# WHY THIS FILE EXISTS AND NOT INLINE nrpe-ctr.cfg. Two reasons, both load
+# bearing. nrpe-ctr.cfg is committed to a PUBLIC repo and one row below carries
+# a mail address (same reason google-accounts.conf exists). And NRPE command
+# definitions are a bad place for JSON and regex: argument passing is off by
+# default and the quoting is a trap. nrpe-ctr.cfg names a key, this file holds
+# the substance.
+#
+# FORMAT (7 fields, pipe separated):
+#   key|port|tool|token|scope|args_json|expect_regex
+#
+#   key     probe name, matches the NRPE command check_mcp_tool_<key-suffix>
+#   port    127.0.0.1 port from the service unit's ExecStart
+#   tool    ONE tool, read-only, and free. A list/status call, never a
+#           generation call. No row here reaches a paid API.
+#   token   empty, or <container>:<ENV_VAR> to read a bearer token out of that
+#           container's own environment through the podman socket. Only
+#           mcp-memory and mcp-grafana need one; nothing is copied into /srv.
+#   scope   'local' (the dependency is on gloval -- red is ours, and fixable)
+#           or 'upstream:<who>' (red may be somebody else's outage). Printed in
+#           the alert so Kagetora can triage without reading this file. It is a
+#           DECLARED fact: the probe cannot tell an expired token from a
+#           third-party outage, and must not pretend to.
+#   args    JSON object passed as the tool's arguments. {} for most.
+#   expect  ERE asserted against the response. LAST field, so it may contain |.
+#
+# WRITING AN expect REGEX -- the part people get wrong:
+#   1. It must assert REAL DATA, not that a reply arrived. The 2026-11-07
+#      mcp-gemini outage returned HTTP 200, isError false, and an error string
+#      as its content, for every tool, for hours, with all three liveness
+#      checks green. "The server answered" was true the whole time.
+#   2. The tool result is a JSON string INSIDE the JSON-RPC envelope, so its
+#      quotes arrive escaped (\"total_files\":102085). Match bare words and
+#      skip the quotes, or the regex silently never matches.
+#   3. Beware substrings. 'healthy' matches 'unhealthy'; \bhealthy\b does not.
+#   4. Every regex below was written against that server's actual live output,
+#      not guessed. If you change a probe tool, go look at what it returns.
+#
+# Every tool here was checked for readOnlyHint and for cost before being
+# chosen. Do not swap in a generation, write or refresh call.
+#
+# key|port|tool|token|scope|args_json|expect_regex
+# -----------------------------------------------------------------------------
+
+# --- local: red is ours, and there is something to do about it ---------------
+mcp-feeds|8018|get_stats_tool||local|{}|total_feeds.*[1-9]
+mcp-grafana|8029|list_datasources|mcp-grafana:MCP_GRAFANA_SERVER_TOKEN|local|{}|datasources.*influxdb
+mcp-memory|8765|memory_health|mcp-memory:MCP_API_KEY|local|{}|\bhealthy\b
+mcp-metsuke|8009|list_reports_tool||local|{}|weekend-report
+mcp-nagios|8026|nagios_program_status_tool||local|{}|NAGIOS HEALTH: OK
+mcp-podman|8023|system_info_tool||local|{}|gloval\.dc4\.crunchtools\.com
+mcp-rt|8004|get_new_tickets_tool||local|{}|New tickets \([0-9]+ total\)
+mcp-syslog|8027|syslog_sources_tool||local|{}|[0-9]+ log source
+mcp-systemd|8022|system_status_tool||local|{}|SystemState.*running
+mcp-trove|8032|trove_status_tool||local|{}|total_files.*[1-9]
+mcp-wiki|8016|get_site_info_tool||local|{}|generator.*MediaWiki
+mcp-wp-crunch|8002|wordpress_test_connection||local|{}|Successfully connected to WordPress
+mcp-wp-ec|8003|wordpress_test_connection||local|{}|Successfully connected to WordPress
+
+# --- upstream: red may be a third party having a bad day ---------------------
+mcp-cloudflare|8008|list_zones_tool||upstream:api.cloudflare.com|{}|zones.*status.*active
+mcp-gemini|8006|gemini_list_caches_tool||upstream:generativelanguage.googleapis.com|{}|caches.*count
+mcp-github|8014|list_workflow_runs_tool||upstream:api.github.com|{"repo":"nagios-agent"}|total_count.*[0-9]
+mcp-gitlab|8033|get_current_user_tool||upstream:gitlab.com|{}|username.*fatherlinux
+# The one row not written against an observed healthy response: this server's
+# OAuth was already expired when the probe was written, which is how we found
+# out. Grounded instead in the contract -- list_sites_tool is a straight
+# passthrough of Google's Webmasters v3 GET /sites (tools/sites.py in
+# crunchtools/mcp-google-search-console), which answers
+# {"siteEntry":[{"siteUrl":...,"permissionLevel":...}]}. Note an account with
+# NO verified properties gets {} back, which would read as broken; Scott's has
+# several, so that is theoretical. Still worth a look after the re-auth.
+mcp-gsc|8017|list_sites_tool||upstream:searchconsole.googleapis.com|{}|siteEntry|siteUrl
+mcp-gw-personal|8011|list_gmail_labels||upstream:gmail.googleapis.com|{"user_google_email":"YOUR_GOOGLE_ACCOUNT@example.com"}|INBOX
+mcp-lightspeed|8024|planning__get_rhel_lifecycle||upstream:console.redhat.com|{}|RHEL.*support_status
+mcp-notebooklm|8025|server_info||upstream:notebooklm.google.com|{}|auth_status.*configured
+mcp-pcloud|8028|pcloud_auth_status||upstream:api.pcloud.com|{}|authorized and verified
+mcp-rhhi|8030|list_images_tool||upstream:images.redhat.com|{}|application_category
