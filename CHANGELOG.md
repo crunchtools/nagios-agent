@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.9.0] - 2026-11-09
+
+### Added
+
+- `check_openbao.sh`: is gloval's OpenBao up and unsealed? It has been running
+  on gloval since the RT#1604 cutover, wired by host-side overrides only, so
+  the image never carried it and a rebuild would have dropped it. Released now
+  with its `command[check_openbao]` NRPE definition. The check uses the
+  UNAUTHENTICATED `/v1/sys/health`, so no token, role_id or secret_id enters
+  the monitoring path, and it parses with sed rather than jq because the agent
+  image has neither jq nor python3. Treat CRITICAL as "the host cannot boot
+  cleanly": every `srv-secrets@` oneshot fetches from this server and every
+  service unit `Requires=` its oneshot, so a sealed store stops the whole host
+  rather than degrading one service.
+
+### Changed
+
+- `config-sources.conf`: map `openbao.crunchtools.com` to `none`. It was the
+  one UNMAPPED service in the config-drift check on gloval. Applying the file's
+  own rule -- read the unit, see what image it pulls -- the answer is the
+  upstream image pinned by digest, so no crunchtools repo builds it and nothing
+  outside /srv holds a copy of its config. "none" is the answer, not a shrug,
+  and saying so is what distinguishes "we looked and found nothing" from
+  "nobody ever looked".
+
 ## [9.8.0] - 2026-11-09
 
 ### Added
