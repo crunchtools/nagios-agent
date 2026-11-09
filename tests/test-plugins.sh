@@ -1911,6 +1911,35 @@ STUB_SOCK="$INSPECT_TOKEN" STUB_DIRECT="$MCP_OK" expect "a bearer token is read 
 STUB_SOCK='' STUB_DIRECT="$MCP_OK" expect "an unreadable token is UNKNOWN, not CRITICAL" 3 \
     "^UNKNOWN - could not read \\\$SOME_TOKEN from container some-ctr" any -- "$MT" tokened "$MTD/probes.conf"
 
+# A Nagios plugin line reaches the Nagios log, the web UI, Hermes and Matrix.
+# The tool's own error text is kept because it is the most useful thing in the
+# page, so credential-shaped material in it must be redacted instead.
+leaky() {
+    printf '%s\n\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"text":"%s","type":"text"}],"isError":true}}' \
+        "HTTP/1.1 200 OK
+mcp-session-id: deadbeefcafe" "$1"
+}
+STUB_DIRECT="$(leaky 'upstream rejected: Authorization: Bearer ya29.A0ARrdaM-VERYSECRETVALUE')" \
+    expect "a bearer token in the tool error is redacted" 2 \
+    "reported isError: upstream rejected: Authorization: Bearer \[REDACTED\] *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'GET /v1/x?api_key=abcd1234efgh5678 failed')" \
+    expect "a credential query parameter is redacted" 2 \
+    "reported isError: GET /v1/x\?api_key=\[REDACTED\] failed *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMiJ9.abc')" \
+    expect "a JWT in the tool error is redacted" 2 \
+    "reported isError: bad token \[REDACTED-JWT\] *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'cannot reach postgres://user:hunter2@db:5432/x')" \
+    expect "a URL password is redacted" 2 \
+    "reported isError: cannot reach postgres://\[REDACTED-USERINFO\]@db:5432/x *$" any -- "$MT" good "$MTD/probes.conf"
+STUB_DIRECT="$(leaky 'github said ghp_AAAABBBBCCCCDDDDEEEEFFFFGGGG is bad')" \
+    expect "a provider token pattern is redacted" 2 \
+    "reported isError: github said \[REDACTED-TOKEN\] is bad *$" any -- "$MT" good "$MTD/probes.conf"
+# ...and the diagnostic value survives: the real mcp-gsc text must come through
+# intact, because that is what routed the 2026-11-09 alert correctly.
+STUB_DIRECT="$(leaky "Error calling tool 'list_sites_tool': OAuth credentials expired or missing. Re-authenticate by visiting: http://127.0.0.1:8017/auth")" \
+    expect "a benign error message is NOT mangled" 2 \
+    "reported isError: Error calling tool 'list_sites_tool': OAuth credentials expired or missing\. Re-authenticate by visiting: http://127\.0\.0\.1:8017/auth *$" any -- "$MT" good "$MTD/probes.conf"
+
 # The bearer token must never reach curl's argument list. This container runs
 # --pid=host, so anything that can read /proc/<pid>/cmdline could lift it out
 # of a running curl. Gatehouse caught this as CRITICAL on the first PR.

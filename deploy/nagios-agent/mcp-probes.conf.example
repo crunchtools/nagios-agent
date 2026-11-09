@@ -68,10 +68,15 @@ mcp-cloudflare|8008|list_zones_tool||upstream:api.cloudflare.com|{}|zones.*statu
 mcp-gemini|8006|gemini_list_caches_tool||upstream:generativelanguage.googleapis.com|{}|caches.*count
 mcp-github|8014|list_workflow_runs_tool||upstream:api.github.com|{"repo":"nagios-agent"}|total_count.*[0-9]
 mcp-gitlab|8033|get_current_user_tool||upstream:gitlab.com|{}|username.*fatherlinux
-# expect unverified: this server's OAuth was already expired when the probe was
-# written (see the alert it fires), so its healthy shape has not been observed.
-# Confirm the regex after the next re-auth.
-mcp-gsc|8017|list_sites_tool||upstream:searchconsole.googleapis.com|{}|siteUrl|siteEntry|permissionLevel
+# The one row not written against an observed healthy response: this server's
+# OAuth was already expired when the probe was written, which is how we found
+# out. Grounded instead in the contract -- list_sites_tool is a straight
+# passthrough of Google's Webmasters v3 GET /sites (tools/sites.py in
+# crunchtools/mcp-google-search-console), which answers
+# {"siteEntry":[{"siteUrl":...,"permissionLevel":...}]}. Note an account with
+# NO verified properties gets {} back, which would read as broken; Scott's has
+# several, so that is theoretical. Still worth a look after the re-auth.
+mcp-gsc|8017|list_sites_tool||upstream:searchconsole.googleapis.com|{}|siteEntry|siteUrl
 mcp-gw-personal|8011|list_gmail_labels||upstream:gmail.googleapis.com|{"user_google_email":"YOUR_GOOGLE_ACCOUNT@example.com"}|INBOX
 mcp-lightspeed|8024|planning__get_rhel_lifecycle||upstream:console.redhat.com|{}|RHEL.*support_status
 mcp-notebooklm|8025|server_info||upstream:notebooklm.google.com|{}|auth_status.*configured

@@ -18,9 +18,10 @@
 # green throughout. The expect regex in mcp-probes.conf is the load-bearing
 # part of this plugin; a probe row without a meaningful one is decoration.
 #
-# bash + curl only. The nagios-agent image has no python and no jq -- do not
-# "clean this up" with either. Parsing is grep/sed over the one SSE data line,
-# which is why PAYLOAD_MAX exists below.
+# NO PYTHON, NO JQ. The nagios-agent image ships neither -- do not "clean this
+# up" with either one. Beyond bash and curl this uses only what that image
+# already has: grep, sed, awk, tr, cut, head, mktemp and timeout. Parsing is
+# grep/sed over the one SSE data line, which is why PAYLOAD_MAX exists below.
 #
 # Runs on the :5667 container/slow pool (check_nrpe_ctr), with the other checks
 # that block on somebody else's API. Not the :5666 host pool: a third-party
@@ -62,6 +63,32 @@ OK=0; CRITICAL=2; UNKNOWN=3
 
 die() { echo "UNKNOWN - $1"; exit $UNKNOWN; }
 crit() { echo "CRITICAL - $1"; exit $CRITICAL; }
+
+# Everything quoted from a server's reply goes through quote(). A Nagios plugin
+# line travels to the Nagios log, the web UI and -- through notify_hermes.sh --
+# to Hermes and Matrix, so a tool that echoes a credential in its error text
+# must not put it there.
+#
+# This REDACTS rather than drops. The tool's own error text is the most useful
+# thing in the page: "OAuth credentials expired or missing" is what let the
+# mcp-gsc expiry be diagnosed and routed in under a minute, and a check that
+# said only "the assertion failed" would send someone to read logs by hand.
+#
+# Scrub BEFORE truncating, or a cut can leave half a token on the line.
+scrub() {
+    # Specific, self-identifying shapes first, so a JWT or a provider token
+    # keeps its informative label instead of being swallowed by the generic
+    # keyword rule that follows. Any scheme in the URL rule, not just http:
+    # a postgres:// or amqp:// connection string in an error carries a
+    # password just as happily.
+    sed -E \
+        -e 's/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}[A-Za-z0-9._-]*/[REDACTED-JWT]/g' \
+        -e 's/(gh[pousr]_|github_pat_|xox[baprs]-|glpat-|sk-ant-|sk-)[A-Za-z0-9_-]{8,}/[REDACTED-TOKEN]/g' \
+        -e 's#([a-zA-Z][a-zA-Z0-9+.-]*://)[^/[:space:]@"]+:[^/[:space:]@"]+@#\1[REDACTED-USERINFO]@#g' \
+        -e 's/(access_token|refresh_token|api_key|apikey|client_secret|id_token|sig|signature)=[^&[:space:]"]+/\1=[REDACTED]/Ig' \
+        -e 's/(bearer|token|key|secret|password|passwd|authorization)([[:space:]]*[:=][[:space:]]*|[[:space:]]+)[A-Za-z0-9._~+/=-]{8,}/\1\2[REDACTED]/Ig'
+}
+quote() { tr '\n' ' ' | scrub | cut -c1-"${1:-160}"; }
 
 KEY="${1:-}"
 [[ -n "$KEY" ]] || die "usage: check_mcp_tool.sh <probe-key> [conf]"
@@ -159,7 +186,7 @@ INIT_RAW="$(curl -sS --max-time "$TIMEOUT" -D - -X POST "$URL" \
     2>&1)"
 RC=$?
 if (( RC != 0 )); then
-    crit "${TAG}: MCP initialize failed on 127.0.0.1:${PORT} (curl exit ${RC}): $(tr '\n' ' ' <<<"$INIT_RAW" | cut -c1-120)"
+    crit "${TAG}: MCP initialize failed on 127.0.0.1:${PORT} (curl exit ${RC}): $(quote 120 <<<"$INIT_RAW")"
 fi
 
 HTTP_CODE="$(grep -a -o -m1 '^HTTP/[0-9.]* [0-9][0-9][0-9]' <<<"$INIT_RAW" | awk '{print $2}')"
@@ -167,7 +194,7 @@ if [[ -n "$HTTP_CODE" && ! "$HTTP_CODE" =~ ^2 ]]; then
     crit "${TAG}: MCP initialize returned HTTP ${HTTP_CODE} on port ${PORT}"
 fi
 if grep -qa '"error"[[:space:]]*:[[:space:]]*{' <<<"$INIT_RAW"; then
-    crit "${TAG}: MCP initialize returned a JSON-RPC error: $(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' <<<"$INIT_RAW" | head -1 | cut -c1-140)"
+    crit "${TAG}: MCP initialize returned a JSON-RPC error: $(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' <<<"$INIT_RAW" | head -1 | quote 140)"
 fi
 
 SID="$(tr -d '\r' <<<"$INIT_RAW" | awk 'tolower($1)=="mcp-session-id:"{print $2; exit}')"
@@ -193,7 +220,7 @@ RC=$?
 ELAPSED=$(( SECONDS - START ))
 
 if (( RC != 0 )); then
-    crit "${TAG}: ${TOOL} call failed (curl exit ${RC}) after ${ELAPSED}s: $(tr '\n' ' ' <<<"$BODY" | cut -c1-120)"
+    crit "${TAG}: ${TOOL} call failed (curl exit ${RC}) after ${ELAPSED}s: $(quote 120 <<<"$BODY")"
 fi
 [[ -n "$BODY" ]] || crit "${TAG}: ${TOOL} returned an empty response after ${ELAPSED}s"
 
@@ -203,20 +230,20 @@ PAYLOAD="$(grep -a '^data:' <<<"$BODY" | sed 's/^data:[[:space:]]*//' | tr -d '\
 
 # Transport-level JSON-RPC error (unknown tool, bad arguments, auth).
 if grep -qa '"error"[[:space:]]*:[[:space:]]*{' <<<"$PAYLOAD"; then
-    crit "${TAG}: ${TOOL} returned a JSON-RPC error: $(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | cut -c1-140)"
+    crit "${TAG}: ${TOOL} returned a JSON-RPC error: $(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | quote 140)"
 fi
 # Tool-level failure the server did flag.
 if grep -qa '"isError"[[:space:]]*:[[:space:]]*true' <<<"$PAYLOAD"; then
-    crit "${TAG}: ${TOOL} reported isError: $(sed -n 's/.*"text":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | cut -c1-160)"
+    crit "${TAG}: ${TOOL} reported isError: $(sed -n 's/.*"text":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | quote)"
 fi
 if ! grep -qa '"result"' <<<"$PAYLOAD"; then
-    crit "${TAG}: ${TOOL} answered without a result object: $(cut -c1-160 <<<"$PAYLOAD")"
+    crit "${TAG}: ${TOOL} answered without a result object: $(quote <<<"$PAYLOAD")"
 fi
 
 # The assertion that would have caught 2026-11-07: a 200 with isError false
 # whose content was an error string.
 if ! grep -Eqa -- "$EXPECT" <<<"$PAYLOAD"; then
-    crit "${TAG}: ${TOOL} answered but the result does not match /${EXPECT}/ -- tool is reachable and broken: $(sed -n 's/.*"text":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | cut -c1-160)"
+    crit "${TAG}: ${TOOL} answered but the result does not match /${EXPECT}/ -- tool is reachable and broken: $(sed -n 's/.*"text":"\([^"]*\)".*/\1/p' <<<"$PAYLOAD" | head -1 | quote)"
 fi
 
 echo "OK - ${KEY} [${SCOPE}]: ${TOOL} returned a valid result in ${ELAPSED}s (matched /${EXPECT}/)"
