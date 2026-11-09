@@ -1621,6 +1621,14 @@ STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' \
 STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" \
 STUB_ROTP_TOP='{"Processes":[["5"]],"Titles":["TIME"]}' STUB_ROTP_LOGS_RC=28 rcol "$RPC"
 ok_if "an unreadable log is result=error" grep -q 'result=error msg=container_log_unreadable' "$RPSTAT"
+# ps prints `times` as whole seconds and `time` as [[dd-]hh:]mm:ss, under the
+# same TIME header. Summing the digit groups of the second format is not
+# monotonic -- 00:00:59 sums to 59 and 00:01:00 to 1 -- so CPU progress would
+# vanish every minute and a slow rotation would read as frozen. A row that is
+# not a bare integer is a read failure, loudly, rather than a bogus total.
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" STUB_ROTP_TOP='{"Processes":[["03:40:26"]],"Titles":["TIME"]}' STUB_ROTP_LOGS="$(rp_log 5 0)" rcol "$RPC"
+ok_if "a time-formatted ps column is result=error, not a non-monotonic sum" \
+    grep -q 'result=error msg=podman_top_unreadable' "$RPSTAT"
 # date -d "" succeeds and returns TODAY AT MIDNIGHT, so an error body used to
 # come out as a plausible start time instead of a failure.
 STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' STUB_ROTP_INSPECT='{"cause":"no such container"}' \

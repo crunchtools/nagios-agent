@@ -80,19 +80,36 @@ names=$(printf '%s' "$list" | grep -o '"Names":\[[^]]*\]' | grep -o '"[^"]*"' | 
 # /containers/{id}/top runs ps on the HOST against the container's PID
 # namespace, so nothing has to exist inside the target and no exec session is
 # created — the reason check_container_process_count.sh moved off podman_exec
-# (RT #1493). `times` is whole CPU seconds and monotonic per process, so the sum
-# is monotonic too. Echoes the total, or nothing when the table is unreadable.
+# (RT #1493).
+#
+# `times`, NOT `time`. ps prints `times` as cumulative CPU in WHOLE SECONDS,
+# which is what makes summing rows safe; `time` prints the same quantity as
+# [[dd-]hh:]mm:ss, and summing the digit groups of that is not monotonic —
+# 00:00:59 sums to 59 and 00:01:00 to 1, so CPU progress would vanish at every
+# minute boundary and a slow rotation would read as frozen. Both print the
+# header TIME, so the response cannot be told apart by its header.
+#
+# So the format is not trusted to the ps_args above staying what it is: every
+# row MUST be a bare integer, and anything else is a read failure. The plugin
+# turns that into UNKNOWN, which is the loud version of this going wrong.
+#
+# Echoes the total, or returns non-zero when the table is unreadable.
 container_cpu() {
-    local raw n total=0
+    local raw rows row n total=0
     raw=$(curl -s --max-time 10 --unix-socket "$SOCK" \
             "$API/containers/$1/top?ps_args=-eo%20times" 2>/dev/null) || return 1
     # Positive proof of a process table. A stopped or renamed container answers
     # {"cause":...}, which must never read as zero CPU — that is indistinguishable
     # from a wedge and would be a false alarm on a container that merely finished.
     printf '%s' "$raw" | grep -q '"Titles"' || return 1
-    for n in $(printf '%s' "${raw%%\"Titles\"*}" | grep -oE '[0-9]+'); do
+    # One-column rows, cut before Titles so its own ["TIME"] row is not counted.
+    rows=$(printf '%s' "${raw%%\"Titles\"*}" | grep -oE '\["[^"]*"\]')
+    [ -n "$rows" ] || return 1
+    while IFS= read -r row; do
+        n=${row#\[\"}; n=${n%\"\]}
+        [[ $n =~ ^[0-9]+$ ]] || return 1
         total=$((total + n))
-    done
+    done <<< "$rows"
     printf '%s' "$total"
 }
 
