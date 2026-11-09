@@ -39,6 +39,9 @@ for a in "$@"; do
     fi
 done
 printf '%s' "${@: -1}" > "$STUB_DIRECT_URL"
+# Opt-in full argv capture, for asserting a secret never reaches the command
+# line. Appends, so a plugin making several calls is fully covered.
+[ -n "${STUB_DIRECT_ARGS:-}" ] && printf '%s\n' "$@" >> "$STUB_DIRECT_ARGS"
 printf '%s' "${STUB_DIRECT:-}"
 exit "${STUB_DIRECT_RC:-0}"
 STUB
@@ -1907,6 +1910,24 @@ STUB_SOCK="$INSPECT_TOKEN" STUB_DIRECT="$MCP_OK" expect "a bearer token is read 
 # check, and blaming the MCP server for it would send someone the wrong way.
 STUB_SOCK='' STUB_DIRECT="$MCP_OK" expect "an unreadable token is UNKNOWN, not CRITICAL" 3 \
     "^UNKNOWN - could not read \\\$SOME_TOKEN from container some-ctr" any -- "$MT" tokened "$MTD/probes.conf"
+
+# The bearer token must never reach curl's argument list. This container runs
+# --pid=host, so anything that can read /proc/<pid>/cmdline could lift it out
+# of a running curl. Gatehouse caught this as CRITICAL on the first PR.
+ARGCAP="$MTD/argv"
+: > "$ARGCAP"
+STUB_SOCK="$INSPECT_TOKEN" STUB_DIRECT="$MCP_OK" STUB_DIRECT_ARGS="$ARGCAP" \
+    expect "a tokened probe still passes with the header in a file" 0 \
+    "^OK - tokened \[local\]" any -- "$MT" tokened "$MTD/probes.conf"
+ok_if "the token value never reaches curl argv" test -s "$ARGCAP"
+# ok_if runs its arguments as a command, and `!` is a shell keyword rather than
+# one, so the negation needs a real command to live in.
+absent_from() { ! grep -q "$1" "$2"; }
+ok_if "the token value is absent from curl argv" absent_from 's3kr1t' "$ARGCAP"
+ok_if "the auth header is passed as @file" grep -q '^@/' "$ARGCAP"
+# ...and the file it points at is gone once the plugin exits, and was private.
+hdrpath=$(grep -m1 '^@/' "$ARGCAP" | sed 's/^@//')
+ok_if "the header file is removed on exit" test ! -e "$hdrpath"
 
 # Table faults are UNKNOWN: the probe never ran, so nothing is known about the
 # server. A row with no assertion is the dangerous one -- it would pass on an

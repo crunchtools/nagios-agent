@@ -32,6 +32,12 @@
 # container already mounts. One source of truth, and it checks the token the
 # server itself is actually running with. The value is never printed.
 #
+#   It is also never put in curl's ARGUMENT LIST. This container runs
+#   --pid=host, so anything on the box that can read /proc/<pid>/cmdline could
+#   lift the credential out of a running curl. The header goes in a 0600 temp
+#   file passed as `-H @file`, which is the same reason notify_hermes.sh hands
+#   curl its ingress token as `-H @<(...)` instead of inline.
+#
 # SESSIONS. Stateful servers (fastmcp default) hand back an mcp-session-id and
 # want notifications/initialized before a call; the two stateless ones return
 # no id and work without it. Both paths are handled, and a session is DELETEd
@@ -97,11 +103,29 @@ EXPECT="$(cut -d'|' -f7- <<<"$ROW")"
 TAG="${KEY} [${SCOPE}]"
 
 URL="http://127.0.0.1:${PORT}/mcp"
+HDR_COMMON=(-H 'Content-Type: application/json'
+            -H 'Accept: application/json, text/event-stream')
 
 # ---------------------------------------------------------------------------
 # Bearer token, read from the target container's own environment.
 # ---------------------------------------------------------------------------
 AUTH=()
+SID=""
+HDRFILE=""
+
+# Set before the header file exists so no path can leak it. The session DELETE
+# needs the auth header, so it runs before the file goes away.
+cleanup() {
+    if [[ -n "$SID" ]]; then
+        curl -sS --max-time 5 -o /dev/null -X DELETE "$URL" \
+            "${HDR_COMMON[@]}" "${AUTH[@]+"${AUTH[@]}"}" \
+            -H "mcp-session-id: ${SID}" >/dev/null 2>&1
+    fi
+    [[ -n "$HDRFILE" ]] && rm -f "$HDRFILE"
+    return 0
+}
+trap cleanup EXIT
+
 if [[ -n "$TOKEN_SRC" ]]; then
     TCTR="${TOKEN_SRC%%:*}"
     TVAR="${TOKEN_SRC##*:}"
@@ -114,11 +138,14 @@ if [[ -n "$TOKEN_SRC" ]]; then
     # in this check, not in the server it is watching. Saying CRITICAL here
     # would blame the MCP server for the monitoring being broken.
     [[ -n "$TOK" ]] || die "could not read \$$TVAR from container $TCTR via $SOCK"
-    AUTH=(-H "Authorization: Bearer ${TOK}")
+    # 0600 under umask 077, and `-H @file` so the token never reaches argv.
+    HDRFILE="$(umask 077; mktemp 2>/dev/null)" \
+        || die "could not create a private header file for the bearer token"
+    printf 'Authorization: Bearer %s\n' "$TOK" > "$HDRFILE" \
+        || die "could not write the bearer token header file"
+    unset TOK
+    AUTH=(-H "@${HDRFILE}")
 fi
-
-HDR_COMMON=(-H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream')
 
 START=$SECONDS
 
@@ -154,13 +181,6 @@ if [[ -n "$SID" ]]; then
         "${HDR_COMMON[@]}" "${AUTH[@]+"${AUTH[@]}"}" "${SIDHDR[@]}" \
         -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null 2>&1
 fi
-
-cleanup() {
-    [[ -n "$SID" ]] && curl -sS --max-time 5 -o /dev/null -X DELETE "$URL" \
-        "${HDR_COMMON[@]}" "${AUTH[@]+"${AUTH[@]}"}" "${SIDHDR[@]}" >/dev/null 2>&1
-    return 0
-}
-trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
 # 2. tools/call — the actual point of this check.
