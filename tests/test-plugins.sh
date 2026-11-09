@@ -955,6 +955,24 @@ expect "missing status is UNKNOWN and starts the collector" 3 "^CONFIG DRIFT UNK
 grep -q -- '--detach nagios-agent-ctr.crunchtools.com /collector' "$STUB_EXEC_MARK" \
     && { echo "  PASS: kick is a detached exec in the ctr agent"; PASS=$((PASS + 1)); } \
     || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+# A suffix tie goes to the candidate whose path names the service; a longer
+# suffix still wins outright. tig keeps deploy/telegraf-host/telegraf.conf and
+# deploy/telegraf-receiver/telegraf.conf, and both deployed config/telegraf.conf
+# files used to be reported ambiguous. Here alpha's and beta's t.conf each have
+# their own counterpart, and alpha's sub/u.conf matches the rival's sub/u.conf
+# (suffix 2) over deploy/alpha/u.conf (suffix 1 plus the name), which differs:
+# picking the named one would report it divergent.
+rm -rf "$CW/srv" "$CW/gh/org/rival"
+git init -q "$CW/srv"; mkdir -p "$CW/srv/alpha.example/config/sub" "$CW/srv/beta.example/config"
+echo a > "$CW/srv/alpha.example/config/t.conf"; echo b > "$CW/srv/beta.example/config/t.conf"
+echo u > "$CW/srv/alpha.example/config/sub/u.conf"
+git -C "$CW/srv" add -A; git -C "$CW/srv" commit -qm srv; git -C "$CW/srv" update-ref refs/remotes/origin/master HEAD
+git init -q "$CW/gh/org/rival"; mkdir -p "$CW/gh/org/rival/deploy/alpha" "$CW/gh/org/rival/deploy/beta" "$CW/gh/org/rival/sub"
+echo a > "$CW/gh/org/rival/deploy/alpha/t.conf"; echo b > "$CW/gh/org/rival/deploy/beta/t.conf"
+echo u > "$CW/gh/org/rival/sub/u.conf"; echo other > "$CW/gh/org/rival/deploy/alpha/u.conf"
+git -C "$CW/gh/org/rival" add -A; git -C "$CW/gh/org/rival" commit -qm r
+printf 'alpha.example rival\nbeta.example rival\n' > "$CW/sources.conf"
+expect "a suffix tie goes to the candidate naming the service; a longer suffix still wins" 0 "^CONFIG DRIFT OK - 3 deployed config file\\(s\\), none with a divergent second git home \\| divergent=0;.*duplicate=3;.*ambiguous=0;" no -- cd_
 rm -rf "$CW"
 
 echo "=== check_git_drift (grace) ==="
