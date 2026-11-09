@@ -1224,6 +1224,19 @@ case "$url" in
         [ -n "${STUB_NOEXEC:-}" ] && { printf '{"cause":"no such container"}'; exit 0; }
         printf '{"Id":"abc123"}' ;;
     */exec/*/start) printf '%s' "${STUB_OAUTH:-}" ;;
+    # rotation-progress-collect.sh: the running list, one inspect, one ps table
+    # and one log read per rotation. Each has its own exit code so a listing
+    # that succeeds and a per-container read that fails are told apart.
+    */libpod/containers/json)
+        [ "${STUB_ROTP_LIST_RC:-0}" -ne 0 ] && exit "$STUB_ROTP_LIST_RC"
+        printf '%s' "${STUB_ROTP_LIST:-[]}" ;;
+    */containers/*/top*)
+        [ "${STUB_ROTP_TOP_RC:-0}" -ne 0 ] && exit "$STUB_ROTP_TOP_RC"
+        printf '%s' "${STUB_ROTP_TOP:-}" ;;
+    */libpod/containers/*/logs*)
+        [ "${STUB_ROTP_LOGS_RC:-0}" -ne 0 ] && exit "$STUB_ROTP_LOGS_RC"
+        printf '%s' "${STUB_ROTP_LOGS:-}" ;;
+    */containers/*/json) printf '%s' "${STUB_ROTP_INSPECT:-}" ;;
     *) exit 22 ;;
 esac
 exit 0
@@ -1423,6 +1436,217 @@ expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collec
 STUB_OAUTH='OAUTH|200|3599' expect "an '@' in the credential path is collected" 0 "^OK - bob@example.org: refresh token valid" no -- go work
 expect "a rejected conf line is reported, not skipped" 3 "^UNKNOWN - carol@example.net: google-accounts.conf line rejected" no -- gchk broken
 expect "unknown account key is UNKNOWN" 3 "^UNKNOWN - account key 'nobody' not found" no -- gchk nobody
+echo "=== check_backup_rotation_progress (a rotation wedged in flight) ==="
+# RT #1594 made every rotation hold a block shutdown inhibitor for its whole
+# run, so a rotation that never finishes blocks OS updates for ever. These
+# tests pin the one property that makes the check worth having: it must stay
+# quiet through a rotation that is SLOW and fire on one that is STUCK, and on
+# 2026-11-09 those looked identical in rclone's byte counter.
+RP="$LIBEXEC/check_backup_rotation_progress.sh"
+RPC="$LIBEXEC/rotation-progress-collect.sh"
+RPSTAT="$RSTATE/rotation-progress.status"
+
+# rp_status <items...>: write a status file generated now, holding these item lines
+rp_status() {
+    local n; n=$(date +%s)
+    { echo "ROTP generated=$n elapsed=0 items=$#"
+      for i in "$@"; do echo "ROTP $i"; done
+      echo "ROTP end=1"
+    } > "$RPSTAT"
+}
+# rp_item <name> <id> <elapsed> <cpu_frozen> <log_frozen> [extra fields...]
+# Ages are seconds ago; the plugin works entirely in absolute epochs.
+rp_item() {
+    local n; n=$(date +%s)
+    echo "item=$1 id=$2 started=$((n - $3)) seen=$n result=ok cpu=1357 cpu_moved=$((n - $4)) stats_ts=$((n - 60)) flat_ts=$((n - $5)) flat_floor=0 lines=260 pay=22.978_GiB_/_22.978_GiB,_100%,_0_B/s,_ETA_- ${*:6}"
+}
+rp() { rm -f "$STUB_EXEC_MARK"; rchk "$RP"; }
+
+rm -f "$RPSTAT"
+expect "no status file is UNKNOWN and starts the collector" 3 \
+    "^BACKUP ROTATIONS UNKNOWN - collector stale: no status file" any -- env STATE_DIR="$RSTATE" EXEC="$RSTUBS/kick" COLLECT=/collector "$RP"
+kick_args "the kick names the collector" '^--detach .* /collector$'
+
+printf 'ROTP generated=%s elapsed=0 items=0\n' "$(date +%s)" > "$RPSTAT"
+expect "a file with no end=1 is UNKNOWN, not empty" 3 \
+    "^BACKUP ROTATIONS UNKNOWN - collector stale: .* truncated or unrecognised" any -- rp
+rp_status; age_status "$RPSTAT" 9000
+expect "a stale file is UNKNOWN" 3 "^BACKUP ROTATIONS UNKNOWN - collector stale: last collection 2h30m ago" any -- rp
+rp_status
+expect "no rotation in flight is OK" 0 "^BACKUP ROTATIONS OK - no rotation in flight \| inflight=0 stalled=0" any -- rp
+
+# THE HARD CASE, measured on gloval 2026-11-09. A personal rotation 4h20m in,
+# its byte counter byte-identical for 2h30m in rclone's --delete-during pass,
+# still burning CPU. Ruled SLOW, not wedged. A check that pages here is a check
+# that gets acknowledged every time, so this staying OK is the whole point.
+rp_status "$(rp_item pbs-personal-monthly-2 50e73289375e 15600 60 9000)"
+expect "bytes flat 2h30m but CPU still moving is OK" 0 \
+    "^BACKUP ROTATIONS OK - pbs-personal-monthly-2: running 4h20m \(personal\), moved 0h01m ago \(CPU\), 2h30m ago \(bytes\)" any -- rp
+
+# Same rotation, same byte counter, CPU stopped too: nothing is moving at all.
+rp_status "$(rp_item pbs-personal-monthly-2 50e73289375e 15600 3000 9000)"
+expect "neither bytes nor CPU moving for 50m is WARNING" 1 \
+    "^BACKUP ROTATIONS WARNING - pbs-personal-monthly-2: running 4h20m, nothing has moved for 0h50m \(no bytes, no CPU" any -- rp
+expect "the first line names the rotation and both durations" 1 \
+    "running 4h20m, nothing has moved for 0h50m.*last stats: 22\.978 GiB / 22\.978 GiB, 100%, 0 B/s, ETA -" any -- rp
+
+rp_status "$(rp_item pbs-personal-monthly-2 50e73289375e 15600 2600 9000)"
+expect "frozen 43m is below the 45m personal window" 0 "^BACKUP ROTATIONS OK - pbs-personal" any -- rp
+
+# CRITICAL needs BOTH conditions, which is what keeps it rare: the run cannot
+# finish AND updates have been blocked half a day.
+rp_status "$(rp_item pbs-personal-monthly-2 50e73289375e 46800 3000 9000)"
+expect "frozen past the 12h personal ceiling is CRITICAL" 2 \
+    "^BACKUP ROTATIONS CRITICAL - pbs-personal-monthly-2: running 13h00m, past the 12h00m ceiling, nothing has moved for 0h50m" any -- rp
+rp_status "$(rp_item pbs-personal-monthly-2 50e73289375e 46800 60 120)"
+expect "past the ceiling but still moving is WARNING, not CRITICAL" 1 \
+    "^BACKUP ROTATIONS WARNING - pbs-personal-monthly-2: running 13h00m, past the 12h00m ceiling but still moving" any -- rp
+
+# Server rotations run ~10h normally, so their window is wider. The same 50m
+# freeze that pages a personal rotation is nothing here.
+rp_status "$(rp_item pbs-server-weekly aaaaaaaaaaaa 36000 3000 3000)"
+expect "50m frozen is OK for a server rotation" 0 "^BACKUP ROTATIONS OK - pbs-server-weekly: running 10h00m \(server\)" any -- rp
+rp_status "$(rp_item pbs-server-weekly aaaaaaaaaaaa 36000 9000 9000)"
+expect "2h30m frozen is WARNING for a server rotation" 1 \
+    "^BACKUP ROTATIONS WARNING - pbs-server-weekly: running 10h00m, nothing has moved for 2h30m" any -- rp
+rp_status "$(rp_item pbs-server-weekly aaaaaaaaaaaa 90000 60 120)"
+expect "a server run past 24h and still moving is WARNING" 1 \
+    "running 25h00m, past the 24h00m ceiling but still moving" any -- rp
+
+# A name the plugin does not recognise is judged by the generous windows and
+# says so, rather than by thresholds nobody chose for it.
+rp_status "$(rp_item pbs-coldcopy-1 bbbbbbbbbbbb 36000 3000 3000)"
+expect "an unclassified rotation gets the server windows and says so" 0 \
+    "^BACKUP ROTATIONS OK - pbs-coldcopy-1: running 10h00m \(unclassified\)" any -- rp
+
+# A sample that could not be taken is never reported as a healthy backup.
+rp_status "item=pbs-server-weekly id=aaaaaaaaaaaa started=$(( $(date +%s) - 3600 )) seen=$(date +%s) result=error msg=podman_top_unreadable cpu=5"
+expect "a failed sample is UNKNOWN, not OK" 3 \
+    "^BACKUP ROTATIONS UNKNOWN - pbs-server-weekly: sample failed \(podman top unreadable\)" any -- rp
+
+# rclone has not logged a stats line at all. The byte side then counts the whole
+# run as unchanged, so CPU is the only thing that can keep this quiet.
+rp_status "item=pbs-personal-weekly cccccccccccc started=$(( $(date +%s) - 3600 )) seen=$(date +%s) result=ok cpu=1 cpu_moved=$(( $(date +%s) - 3000 )) stats_ts=0 flat_ts=0 flat_floor=0 lines=0 pay=none"
+expect "no stats line at all, CPU frozen, is WARNING and says bytes never moved" 1 \
+    "^BACKUP ROTATIONS WARNING - pbs-personal-weekly: running 1h00m, nothing has moved for 0h50m.*last stats: \(none yet\)" any -- rp
+rp_status "item=pbs-personal-weekly cccccccccccc started=$(( $(date +%s) - 3600 )) seen=$(date +%s) result=ok cpu=1 cpu_moved=$(date +%s) stats_ts=0 flat_ts=0 flat_floor=0 lines=0 pay=none"
+expect "no stats line but CPU moving stays OK, bytes reported as never" 0 \
+    "^BACKUP ROTATIONS OK - pbs-personal-weekly:.*moved 0h00m ago \(CPU\), never \(bytes\)" any -- rp
+
+# flat_floor=1 means the unchanged run reaches the oldest line read, so the
+# figure is a floor. The output says so only when the LOG is the binding side:
+# CPU is sampled, not read back, so "at least" would be wrong about it.
+N=$(date +%s)
+rp_status "item=pbs-personal-monthly-2 id=50e73289375e started=$((N - 15600)) seen=$N result=ok cpu=1357 cpu_moved=$((N - 9000)) stats_ts=$((N - 60)) flat_ts=$((N - 3000)) flat_floor=1 lines=600 pay=22.978_GiB"
+expect "a floored flat run is reported as 'at least'" 1 "nothing has moved for at least 0h50m" any -- rp
+rp_status "item=pbs-personal-monthly-2 id=50e73289375e started=$((N - 15600)) seen=$N result=ok cpu=1357 cpu_moved=$((N - 3000)) stats_ts=$((N - 60)) flat_ts=$((N - 9000)) flat_floor=1 lines=600 pay=22.978_GiB"
+expect "'at least' is not claimed when CPU is the binding side" 1 "nothing has moved for 0h50m \(no bytes" any -- rp
+
+# bash arithmetic reads a non-numeric value as 0, so a field that is not there
+# would make the rotation "frozen" since the epoch — a confident CRITICAL built
+# on nothing.
+rp_status "item=pbs-personal-monthly-2 id=50e73289375e started=$(date +%s) seen=$(date +%s) result=ok cpu=1357 stats_ts=0 flat_ts=0 flat_floor=0 lines=260 pay=x"
+expect "a sample line missing cpu_moved is UNKNOWN, not frozen since 1970" 3 \
+    "^BACKUP ROTATIONS UNKNOWN - pbs-personal-monthly-2: unparseable sample line" any -- rp
+
+# Two rotations at once: the worst is the line a notification carries.
+rp_status "$(rp_item pbs-server-weekly aaaaaaaaaaaa 36000 60 120)" \
+          "$(rp_item pbs-personal-monthly-2 50e73289375e 15600 3000 9000)"
+expect "the worst rotation is named first, the other is counted" 1 \
+    "^BACKUP ROTATIONS WARNING - pbs-personal-monthly-2: .*nothing has moved for 0h50m.* \[\+1 more\]" any -- rp
+
+echo "=== rotation-progress-collect (the CPU baseline) ==="
+# One sample of a cumulative counter proves nothing. cpu_moved is the whole
+# reason this collector exists: it advances only on a real increase, so the
+# plugin can read "how long has this burned no CPU" off one line.
+rp_log() { # <lines> <flat-lines>: one rclone --stats-one-line NOTICE per minute
+    local total=$1 flat=$2 i ts
+    for ((i = total; i >= 1; i--)); do
+        ts=$(date -u -d "@$(( $(date +%s) - i * 60 ))" +%Y-%m-%dT%H:%M:%S.000000000Z)
+        if [ "$i" -le "$flat" ]; then
+            echo "$ts 2026/11/09 06:33:35 NOTICE:    22.978 GiB / 22.978 GiB, 100%, 0 B/s, ETA -"
+        else
+            echo "$ts 2026/11/09 06:33:35 NOTICE:    $i.000 GiB / 30.000 GiB, 50%, 1.5 MiB/s, ETA 1h"
+        fi
+    done
+}
+rpc() { # [cpu]: one collector run, optionally with a different CPU total
+    STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' \
+    STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa7536\",\"State\":{\"Running\":true,\"StartedAt\":\"$(date -u -d "@$(( $(date +%s) - 15600 ))" +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" \
+    STUB_ROTP_TOP="{\"Processes\":[[\"0\"],[\"${1:-1357}\"]],\"Titles\":[\"TIME\"]}" \
+    STUB_ROTP_LOGS="$(rp_log 260 150)" \
+    rcol "$RPC"
+}
+rm -f "$RPSTAT"
+rpc 1357
+ok_if "a first sample records cpu and the container id" \
+    grep -qE '^ROTP item=pbs-personal-monthly-2 id=50e73289375e .*result=ok cpu=1357 ' "$RPSTAT"
+ok_if "a first sample sets cpu_moved to now, so no baseline can invent a stall" \
+    bash -c "[ \$(( \$(date +%s) - \$(grep -oE 'cpu_moved=[0-9]+' '$RPSTAT' | cut -d= -f2) )) -le 5 ]"
+ok_if "flat_ts is the first line of the unchanged run, not the oldest line read" \
+    bash -c "[ \$(( \$(grep -oE ' stats_ts=[0-9]+' '$RPSTAT' | cut -d= -f2) - \$(grep -oE ' flat_ts=[0-9]+' '$RPSTAT' | cut -d= -f2) )) -ge 8900 ]"
+ok_if "the payload is carried for the plugin to print" \
+    grep -q 'pay=22.978_GiB_/_22.978_GiB,_100%,_0_B/s,_ETA_-' "$RPSTAT"
+# podman's log body has no trailing newline. `read` sets the last line and then
+# returns non-zero, so a naive loop drops it -- with one stats line in the
+# window that reported a reporting rotation as silent.
+ok_if "the last log line is parsed although the body has no trailing newline" \
+    bash -c "grep -q ' lines=260 ' '$RPSTAT'"
+
+sed -i -E "s/cpu_moved=[0-9]+/cpu_moved=$(( $(date +%s) - 3000 ))/" "$RPSTAT"
+rpc 1357
+ok_if "cpu unchanged carries the previous cpu_moved forward" \
+    bash -c "[ \$(( \$(date +%s) - \$(grep -oE 'cpu_moved=[0-9]+' '$RPSTAT' | cut -d= -f2) )) -ge 2900 ]"
+rpc 1360
+ok_if "a real cpu increase moves cpu_moved to now" \
+    bash -c "[ \$(( \$(date +%s) - \$(grep -oE 'cpu_moved=[0-9]+' '$RPSTAT' | cut -d= -f2) )) -le 5 ]"
+
+# Keyed on the container id: a recycled name must not inherit a dead run's
+# baseline, or a fresh rotation would start out looking frozen.
+sed -i -E "s/cpu_moved=[0-9]+/cpu_moved=$(( $(date +%s) - 3000 ))/" "$RPSTAT"
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' \
+STUB_ROTP_INSPECT="{\"Id\":\"ffffffffffff0000\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" \
+STUB_ROTP_TOP='{"Processes":[["1357"]],"Titles":["TIME"]}' STUB_ROTP_LOGS="$(rp_log 5 0)" rcol "$RPC"
+ok_if "a different container id starts a fresh baseline" \
+    bash -c "[ \$(( \$(date +%s) - \$(grep -oE 'cpu_moved=[0-9]+' '$RPSTAT' | cut -d= -f2) )) -le 5 ]"
+
+# A ps table that is not a ps table must never read as zero CPU -- that is
+# indistinguishable from a wedge, on a container that merely finished.
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' \
+STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" \
+STUB_ROTP_TOP='{"cause":"no such container","response":404}' STUB_ROTP_LOGS="$(rp_log 5 0)" rcol "$RPC"
+ok_if "an error body from top is result=error, not cpu=0" \
+    grep -q 'result=error msg=podman_top_unreadable' "$RPSTAT"
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' \
+STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" \
+STUB_ROTP_TOP='{"Processes":[["5"]],"Titles":["TIME"]}' STUB_ROTP_LOGS_RC=28 rcol "$RPC"
+ok_if "an unreadable log is result=error" grep -q 'result=error msg=container_log_unreadable' "$RPSTAT"
+# ps prints `times` as whole seconds and `time` as [[dd-]hh:]mm:ss, under the
+# same TIME header. Summing the digit groups of the second format is not
+# monotonic -- 00:00:59 sums to 59 and 00:01:00 to 1 -- so CPU progress would
+# vanish every minute and a slow rotation would read as frozen. A row that is
+# not a bare integer is a read failure, loudly, rather than a bogus total.
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' STUB_ROTP_INSPECT="{\"Id\":\"50e73289375e91fa\",\"State\":{\"StartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)\"}}" STUB_ROTP_TOP='{"Processes":[["03:40:26"]],"Titles":["TIME"]}' STUB_ROTP_LOGS="$(rp_log 5 0)" rcol "$RPC"
+ok_if "a time-formatted ps column is result=error, not a non-monotonic sum" \
+    grep -q 'result=error msg=podman_top_unreadable' "$RPSTAT"
+# date -d "" succeeds and returns TODAY AT MIDNIGHT, so an error body used to
+# come out as a plausible start time instead of a failure.
+STUB_ROTP_LIST='[{"Names":["pbs-personal-monthly-2"]}]' STUB_ROTP_INSPECT='{"cause":"no such container"}' \
+STUB_ROTP_TOP='{"Processes":[["5"]],"Titles":["TIME"]}' STUB_ROTP_LOGS="$(rp_log 5 0)" rcol "$RPC"
+ok_if "an unreadable inspect is result=error, not a midnight start time" \
+    grep -q 'started=0 .*result=error msg=inspect_unreadable' "$RPSTAT"
+
+# A local podman socket that will not answer is not routine, so nothing is
+# published and the plugin reports it as collector staleness. Publishing the old
+# samples under a fresh generated= would hide exactly that outage.
+cp "$RPSTAT" "$RSTATE/rotp.before"
+STUB_ROTP_LIST_RC=7 rcol "$RPC"
+ok_if "a failed container listing publishes nothing" cmp -s "$RSTATE/rotp.before" "$RPSTAT"
+STUB_ROTP_LIST='[{"Names":["pbs-x"' rcol "$RPC"
+ok_if "a truncated container listing publishes nothing" cmp -s "$RSTATE/rotp.before" "$RPSTAT"
+STUB_ROTP_LIST='[{"Names":["trentina.crunchtools.com"]},{"Names":["nagios-agent.crunchtools.com"]}]' rcol "$RPC"
+ok_if "containers that are not rotations are ignored" grep -q '^ROTP generated=[0-9]* elapsed=[0-9]* items=0$' "$RPSTAT"
+
 rm -rf "$RSTATE" "$RSTUBS"
 
 echo "=== check_container_postgres ==="

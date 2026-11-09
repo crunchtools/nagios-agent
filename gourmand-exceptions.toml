@@ -519,6 +519,18 @@ justification = "NRPE plugin; must live at the libexec path the daemon executes 
 classification = "by_design"
 
 [[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_backup_rotation_progress.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/rotation-progress-collect.sh"
+justification = "Not an NRPE plugin: the sampling half of check_backup_rotation_progress.sh. That plugin starts it detached via podman_exec.sh --detach by the libexec path it is installed to, so it ships beside the plugin exactly as backup-freshness-collect.sh does."
+classification = "by_design"
+
+[[exceptions]]
 check = "manifest_lint_suppression"
 path = "pyproject.toml"
 justification = "Three entries, tests/ only. S101 is pytest's assert. S603 and S607 are for check_deployer.sh's test: the thing under test is a shell plugin, so testing it means executing it, with an argument vector built from __file__ and a tmp_path and no input from anywhere else -- which is the condition S603 asks about. All three stay on for rootfs/, where each would be a real finding."

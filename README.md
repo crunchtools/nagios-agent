@@ -63,6 +63,18 @@ daemon is the sole witness to its own death.
    `srv-nightly-dump-collect.sh`). The nightly check escalates to root via
    `podman_exec.sh`, the same split the drift checks use, because one service
    writes its dump `0600`.
+
+   Freshness is the wrong instrument for a rotation that is still *running*.
+   Since RT #1594 every rotation holds a systemd block shutdown inhibitor for
+   its whole run, so one that never finishes blocks OS updates for ever —
+   and the freshness checks judge markers written at COMPLETION, with 16 and
+   100 day thresholds, so a run wedged at hour three looks exactly like one
+   that never started. `check_backup_rotation_progress.sh` is the "right now"
+   half. It calls a rotation stuck only when *neither* rclone's byte counter
+   *nor* the container's CPU time has moved for its window, because a personal
+   rotation deep in a `--delete-during` pass can sit on one byte figure for
+   hours while still working — measured on 2026-11-09 — and bytes alone would
+   have paged for a backup that was merely slow.
 8. **Outside calls off the hot path** — the checks in the table below make no
    outside call inside NRPE's timeout (constitution XVI). A collector does the reads with a
    generous budget and a timeout per item, keeps an item's last good answer
@@ -71,6 +83,12 @@ daemon is the sole witness to its own death.
    and starts the collector detached (`podman_exec.sh --detach`) when the file
    is due. UNKNOWN "collector stale" means the file is missing or older than a
    few check intervals. Shared pieces live in `collector-lib.sh`.
+
+   `rotation-progress-collect.sh` is on this list for a different reason: every
+   call it makes is the local podman socket, and what it is off the hot path
+   *for* is a **baseline**. CPU time is a cumulative counter, so one sample of
+   it cannot tell a slow rotation from a wedged one; two samples five minutes
+   apart can.
 
    | Collector | Checks | Kick / stale |
    |-----------|--------|--------------|
@@ -81,6 +99,7 @@ daemon is the sole witness to its own death.
    | `deploy-drift-collect.sh` | Deploy drift | 30m / 3h |
    | `config-drift-repos-collect.sh` | Config drift cross-repo | 30m / 3h |
    | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
+   | `rotation-progress-collect.sh` | Backup rotation progress | 4m / 30m |
 9. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
