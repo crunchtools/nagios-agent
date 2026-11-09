@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Config drift no longer reports `unpublished` for files the mapped repo holds
+  byte for byte under another path (e.g. `rootfs/`). The repos collector
+  re-tests each unpublished path by content hash against the repo's whole tree.
+
 ## [9.9.1] - 2026-11-09
 
 ### Fixed

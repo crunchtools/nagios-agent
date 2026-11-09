@@ -322,6 +322,48 @@ for path in "${!DISK[@]}" "${!SECRET[@]}"; do
         "$kind" "$repo" "$(clean_path "$base")" "$repo" "$(clean_path "$best_path")" >> "$TMP/items"
 done
 
+# Unpublished is a statement about content, not paths: the fingerprint can only
+# compare against the same path in /var/srv, so a file the mapped repo holds
+# elsewhere (an image publishes under rootfs/, no deploy/ prefix) is reported
+# unpublished though origin/master has it byte for byte. Re-test each reported
+# path against every blob in its mapped repos' trees. A fingerprint that sends
+# no paths (older image) keeps its own count and list untouched.
+mapfile -t up_paths < <(fields unpublished_path)
+if [ "${#up_paths[@]}" -gt 0 ]; then
+    unpublished=0
+    unpublished_list=""
+    # Index each mapped repo's blob hashes once, not once per path.
+    declare -A BLOB=()
+    declare -A INDEXED=()
+    for path in "${up_paths[@]}"; do
+        [ -n "$path" ] || continue
+        rivals=${RIVAL[${path%%/*}]:-}
+        for repo in ${rivals//,/ }; do
+            [ "$repo" != none ] || continue
+            [ -z "${INDEXED[$repo]:-}" ] || continue
+            INDEXED[$repo]=1
+            [ -s "${CACHE}/${repo}.tree" ] || continue
+            while read -r bsha _; do
+                BLOB["${repo}:${bsha}"]=1
+            done < "${CACHE}/${repo}.tree"
+        done
+    done
+    for path in "${up_paths[@]}"; do
+        [ -n "$path" ] || continue
+        sha=${DISK[$path]:-}
+        found=0
+        repos=${RIVAL[${path%%/*}]:-}
+        if [ -n "$sha" ] && [ -n "$repos" ] && [ "$repos" != none ]; then
+            for repo in ${repos//,/ }; do
+                if [ -n "${BLOB["${repo}:${sha}"]:-}" ]; then found=1; break; fi
+            done
+        fi
+        [ "$found" -eq 0 ] || continue
+        unpublished=$(( unpublished + 1 ))
+        unpublished_list="${unpublished_list:+$unpublished_list,}${path##*/}"
+    done
+fi
+
 {
     echo "CFGDRIFT generated=$START elapsed=$(( $(date +%s) - START )) deployed=$deployed unpublished=$unpublished"
     echo "CFGDRIFT unpublished_list=$(clean_path "$unpublished_list")"

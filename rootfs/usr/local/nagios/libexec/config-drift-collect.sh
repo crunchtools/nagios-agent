@@ -92,6 +92,7 @@ deployed=0
 skipped=0
 unpublished=0
 unpublished_list=""
+unpublished_paths=""
 blobs=""
 secrets=""
 
@@ -138,6 +139,7 @@ if [ "${#hashable[@]}" -gt 0 ]; then
     if [ "$disk" != "${committed[$path]:-}" ]; then
       unpublished=$(( unpublished + 1 ))
       unpublished_list="${unpublished_list:+$unpublished_list,}${path##*/}"
+      unpublished_paths="${unpublished_paths}${path}"$'\n'
     fi
   done
 fi
@@ -147,6 +149,13 @@ emit deployed         "$deployed"
 emit skipped          "$skipped"
 emit unpublished      "$unpublished"
 emit unpublished_list "$(printf %s "$unpublished_list" | cut -c1-300)"
+
+# Full paths, so the repos collector can re-test each one by content against
+# the rival repo's whole tree (this script only sees the path-keyed ls-tree
+# of /var/srv, which cannot hold files an image publishes under rootfs/).
+while IFS= read -r line; do
+  [ -n "$line" ] && emit unpublished_path "$line"
+done <<< "$unpublished_paths"
 
 while IFS= read -r line; do
   [ -n "$line" ] && emit blob "$line"
