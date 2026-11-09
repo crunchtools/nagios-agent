@@ -928,6 +928,16 @@ rival 'listen 8080'
 echo 'listen 81' > "$CW/srv/svc/config/app.conf"
 expect "unpublished AND divergent is CRITICAL" 2 "^CONFIG DRIFT CRITICAL - 1 deployed file\\(s\\) differ from origin/master AND from a rival git home" no -- cd_
 echo 'listen 80' > "$CW/srv/svc/config/app.conf"
+# Unpublished is content, not path: tool.sh is served from /srv but not on its
+# origin/master, and the rival repo holds the same bytes only under rootfs/
+# (image content, no deploy/ prefix). It is published, so unpublished=0.
+echo 'echo tool' > "$CW/srv/svc/config/tool.sh"
+git -C "$CW/srv" add svc/config/tool.sh
+mkdir -p "$CW/gh/org/rival/rootfs/usr/bin"; cp "$CW/srv/svc/config/tool.sh" "$CW/gh/org/rival/rootfs/usr/bin/tool.sh"
+git -C "$CW/gh/org/rival" add -A; git -C "$CW/gh/org/rival" commit -qm rootfs
+expect "a file the repo holds only under rootfs/ is not unpublished" 1 "unpublished=0;" no -- cd_
+git -C "$CW/srv" rm -qf svc/config/tool.sh
+git -C "$CW/gh/org/rival" rm -qf rootfs/usr/bin/tool.sh; git -C "$CW/gh/org/rival" commit -qm unrootfs
 mv "$CW/gh/org/rival" "$CW/gh/org/gone"
 cdcol
 expect "a failed clone keeps the last good tree" 1 "^CONFIG DRIFT WARNING - 1/1 .*divergent: rival/deploy/app.conf" no -- cdchk
