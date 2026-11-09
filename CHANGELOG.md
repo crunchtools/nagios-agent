@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.9.1] - 2026-11-09
+
+### Changed
+
+- `openbao.crunchtools.com` keeps its `none` mapping, but for a different
+  reason, and the comment now says which. When 9.9.0 shipped that morning the
+  answer came straight from the rule: the unit pulled the upstream image and
+  nothing outside `/srv` carried a copy of its config. That was also the
+  finding, and by the afternoon the image was `quay.io/crunchtools/openbao`,
+  built from `crunchtools/openbao` with the operator tools in it and under
+  test. The mapping still does not move, because that repo is private and a
+  listed repo is read with one anonymous clone and no token -- pointing at it
+  would report `openbao` as "unchecked" every run, which looks like a transient
+  failure rather than a decision. Stated with the cost it accepts: nothing
+  compares openbao's deployed units against the repo copies.
+
 ## [9.9.0] - 2026-11-09
 
 ### Added
