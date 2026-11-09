@@ -332,6 +332,22 @@ mapfile -t up_paths < <(fields unpublished_path)
 if [ "${#up_paths[@]}" -gt 0 ]; then
     unpublished=0
     unpublished_list=""
+    # Index each mapped repo's blob hashes once, not once per path.
+    declare -A BLOB=()
+    declare -A INDEXED=()
+    for path in "${up_paths[@]}"; do
+        [ -n "$path" ] || continue
+        rivals=${RIVAL[${path%%/*}]:-}
+        for repo in ${rivals//,/ }; do
+            [ "$repo" != none ] || continue
+            [ -z "${INDEXED[$repo]:-}" ] || continue
+            INDEXED[$repo]=1
+            [ -s "${CACHE}/${repo}.tree" ] || continue
+            while read -r bsha _; do
+                BLOB["${repo}:${bsha}"]=1
+            done < "${CACHE}/${repo}.tree"
+        done
+    done
     for path in "${up_paths[@]}"; do
         [ -n "$path" ] || continue
         sha=${DISK[$path]:-}
@@ -339,8 +355,7 @@ if [ "${#up_paths[@]}" -gt 0 ]; then
         repos=${RIVAL[${path%%/*}]:-}
         if [ -n "$sha" ] && [ -n "$repos" ] && [ "$repos" != none ]; then
             for repo in ${repos//,/ }; do
-                [ -s "${CACHE}/${repo}.tree" ] || continue
-                if grep -q "^${sha} " "${CACHE}/${repo}.tree"; then found=1; break; fi
+                if [ -n "${BLOB["${repo}:${sha}"]:-}" ]; then found=1; break; fi
             done
         fi
         [ "$found" -eq 0 ] || continue
