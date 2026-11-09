@@ -6,6 +6,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.9.1] - 2026-11-09
+
+### Fixed
+
+- `check_openbao.sh` would have run `rm -f /dev/null` as root. Keeping curl's
+  diagnostic meant a temporary file, and the fallback when `mktemp` fails was
+  `err=/dev/null` — which the EXIT trap then removed. This check runs as root
+  under NRPE, so that unlinks the system's null device and breaks every process
+  that opens it. The fallback is an empty `err` now and the trap is guarded.
+  Caught by Gatehouse at HIGH on #158 before it ever ran as root — introduced
+  and fixed within the same PR.
+
+- `check_openbao.sh` emitted `sealed=true` / `sealed=false` as perfdata. Nagios
+  perfdata values are numbers or `U`, so the one metric this check advertised as
+  graphable was never graphable — it has been like that since 9.9.0 shipped this
+  morning. Now 1 for sealed, 0 for unsealed, `U` when it cannot tell; the
+  human-readable half keeps the words, because that is what gets read in an
+  alert. Found by Gatehouse on #158.
+- `check_openbao.sh` discarded curl's stderr, so a timeout, a TLS verification
+  failure and a refused connection all arrived as the same "no answer" — three
+  different jobs, one message. The diagnostic is now included, and deliberately
+  **before** the pipe: everything after it is perfdata, so prose appended there
+  is parsed as a metric and the whole perfdata string is discarded. Adding a
+  diagnostic the naive way would have cost the graph. Both arms are tested and
+  mutation-tested.
+
+### Changed
+
+- `openbao.crunchtools.com` keeps its `none` mapping, but for a different
+  reason, and the comment now says which. When 9.9.0 shipped that morning the
+  answer came straight from the rule: the unit pulled the upstream image and
+  nothing outside `/srv` carried a copy of its config. That was also the
+  finding, and by the afternoon the image was `quay.io/crunchtools/openbao`,
+  built from `crunchtools/openbao` with the operator tools in it and under
+  test. The mapping still does not move, because that repo is private and a
+  listed repo is read with one anonymous clone and no token -- pointing at it
+  would report `openbao` as "unchecked" every run, which looks like a transient
+  failure rather than a decision. Stated with the cost it accepts: nothing
+  compares openbao's deployed units against the repo copies.
+
 ## [9.9.0] - 2026-11-09
 
 ### Added
