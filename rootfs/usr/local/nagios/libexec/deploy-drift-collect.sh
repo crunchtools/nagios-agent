@@ -81,7 +81,7 @@ printf '%s' "$list" | grep -oP '"Id":"\K[0-9a-f]{64}' | sort -u > "$TMP/ids"
 # Workers run concurrently and each prints a single short line, so the lines
 # cannot interleave.
 check_one() {
-    local id=$1 raw name ref auto have img tag body want start imgid idig
+    local id=$1 raw name ref auto have img tag body want start imgid image_json
     raw=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
         "http://localhost/v5.0.0/libpod/containers/${id}/json") || {
         printf '%s UNKNOWN %s\n' "${id:0:12}" "${id:0:12}"; return
@@ -168,14 +168,21 @@ check_one() {
     # report drift: the common case is unchanged, no Quay budget is spent, and
     # a miss or a failed read still reports BEHIND. This can only ever clear
     # drift it can prove is not drift.
-    imgid=$(printf '%s' "$raw" | grep -oP '"Image":\s*"\K[0-9a-f]{64}' | head -1)
+    # The libpod endpoint this collector reads gives the image id bare, while
+    # the Docker-compat one at /containers/<id>/json gives the same id as
+    # sha256:<hex>. Accept either, so moving this read to the compat path --
+    # or podman normalising on the prefixed form -- cannot silently switch the
+    # check below off and quietly restore the false positive. The 64-hex
+    # anchor is what keeps Config.Image, which holds the image REFERENCE under
+    # the same key, from being picked up instead.
+    imgid=$(printf '%s' "$raw" | grep -oP '"Image":\s*"(?:sha256:)?\K[0-9a-f]{64}' | head -1)
     if [ -n "$imgid" ]; then
-        idig=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
-            "http://localhost/v5.0.0/libpod/images/${imgid}/json") || idig=""
+        image_json=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
+            "http://localhost/v5.0.0/libpod/images/${imgid}/json") || image_json=""
         # Anchored on the repository as well as the digest: the same digest
         # under another repository name is another image's provenance, not
         # this tag's.
-        case "$idig" in
+        case "$image_json" in
             *"\"${PREFIX}${img}@${want}\""*)
                 printf '%s CURRENT %s\n' "${id:0:12}" "$name"; return ;;
         esac

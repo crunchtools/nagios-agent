@@ -781,9 +781,11 @@ chmod +x "$STUBS/kick"
 ID=$(printf 'a%.0s' $(seq 64))
 OLD_TS=$(( $(date +%s) - 40 * 3600 ))
 IMGID=$(printf 'b%.0s' $(seq 64))
-ctr() { # <image-ref> <autoupdate> <digest> [deploy-marker]
-    printf '{"Id":"%s","Name":"svc","Image":"%s","ImageName":"%s","ImageDigest":"%s","Config":{"Labels":{"io.containers.autoupdate":"%s","io.crunchtools.deploy":"%s"}}}' \
-        "$ID" "$IMGID" "$1" "$3" "$2" "${4:-}"
+ctr() { # <image-ref> <autoupdate> <digest> [deploy-marker] [image-id]
+    # Config.Image carries the image REFERENCE under the same key as the
+    # top-level image ID, which is why the collector anchors on 64 hex.
+    printf '{"Id":"%s","Name":"svc","Image":"%s","ImageName":"%s","ImageDigest":"%s","Config":{"Image":"%s","Labels":{"io.containers.autoupdate":"%s","io.crunchtools.deploy":"%s"}}}' \
+        "$ID" "${5:-$IMGID}" "$1" "$3" "$1" "$2" "${4:-}"
 }
 quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}]}' "$1" "$2"; }
 # The image endpoint's answer: which manifests podman has resolved to these
@@ -830,6 +832,18 @@ STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_T
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
     STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT_RC=22 \
     expect "an unreadable image read leaves the verdict stale" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- dd
+# The libpod endpoint gives the image id bare; the Docker-compat one gives the
+# same id as sha256:<hex>. Reading the prefixed form must still find the image,
+# or moving this read to the compat path would switch the check above off and
+# quietly restore the false positive. Gatehouse HIGH on #161.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa "" "sha256:$IMGID") STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:bb) \
+    expect "a sha256:-prefixed image id is still resolved" 0 "^DEPLOY DRIFT OK - 1/1 .*clean=1" no -- dd
+# Config.Image holds the image reference under the same key. It must never be
+# mistaken for the image id.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:bb) \
+    expect "the image reference under Config.Image is not read as an id" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
 STUB_SOCK=$(ctr quay.io/crunchtools/svc@sha256:aa "" sha256:aa) \
     expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" no -- dd
 STUB_SOCK=$(ctr ghcr.io/other/svc:latest "" sha256:aa) \
