@@ -28,24 +28,15 @@ daemon is the sole witness to its own death.
    restarts, all via the podman socket the agent already has.
    `check_container_running.sh`, `check_container_memory.sh`,
    `check_container_restart.sh`.
-3. **An agent that lost its gateway and does not know** — when the Trentina
-   gateway restarts, every client's session dies with it: the gateway logs
-   "client predates a gateway restart" and the agent carries on with no MCP
-   tools at all, looking perfectly healthy. `check_agent_gateway_stale.sh`
-   compares two start times and says so exactly, with a grace so a deliberate
-   restart sequence does not page. It replaced a check that counted
-   ESTABLISHED connections to the gateway: Claude Code's Remote Control polls
-   rather than holding a connection, so that one reported CRITICAL for a
-   healthy agent (one hit in ten samples over two minutes, measured).
-4. **Supply chain** — Quay tag staleness and whether an image is being pulled
+3. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
    `check_quay_pull_source.sh`. Whether every image's newest release reached
    Quay and GHCR, `check_registry_drift.sh`.
-5. **Credential liveness** — Google OAuth grants tested by asking the backend
+4. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
    credential. `check_google_oauth.sh`. Postiz channel tokens, read from its
    own database, `check_postiz_tokens.sh`.
-6. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
+5. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
    and incidents on the components we use, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
    `check_cloudflare_global.sh`,
@@ -53,7 +44,7 @@ daemon is the sole witness to its own death.
    mounted and still answers a listing (`check_fuse_mount.sh`), a SQLite
    index that is not empty (`check_sqlite_rows.sh`), and mcp-trove's last
    nightly index run, from its JSON summary (`check_trove_run.sh`).
-7. **Backup freshness** — the weekly pCloud dumps by age and size floor
+6. **Backup freshness** — the weekly pCloud dumps by age and size floor
    (`check_backup_freshness.sh`), the personal pCloud rotations by the markers
    `crunchtools/pbs` writes after each sync
    (`check_personal_backup_freshness.sh`), both judged from a status file that
@@ -75,7 +66,7 @@ daemon is the sole witness to its own death.
    rotation deep in a `--delete-during` pass can sit on one byte figure for
    hours while still working — measured on 2026-11-09 — and bytes alone would
    have paged for a backup that was merely slow.
-8. **Outside calls off the hot path** — the checks in the table below make no
+7. **Outside calls off the hot path** — the checks in the table below make no
    outside call inside NRPE's timeout (constitution XVI). A collector does the reads with a
    generous budget and a timeout per item, keeps an item's last good answer
    through a failed read, and writes a status file atomically to
@@ -100,7 +91,7 @@ daemon is the sole witness to its own death.
    | `config-drift-repos-collect.sh` | Config drift cross-repo | 30m / 3h |
    | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
    | `rotation-progress-collect.sh` | Backup rotation progress | 4m / 30m |
-9. **Configuration drift, three doors** — `/srv` against its own git
+8. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
    repo that also carries it (`check_config_drift.sh`). The third exists
