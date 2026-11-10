@@ -101,45 +101,6 @@ STUB_SOCK='{"Processes":[],"Titles":["PID","COMMAND"]}' expect "empty table is U
 STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$PC" ctr php-fpm 1 1 X
 expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$PC" '../../x#' php-fpm 1 1 X
 
-echo "=== check_agent_gateway_stale ==="
-GS="$LIBEXEC/check_agent_gateway_stale.sh"
-# Times are built with the same `date` the plugin parses with, so the pair
-# agrees whichever coreutils is installed (ubuntu-26.04 runners ship uutils).
-iso_ago() { date -u -d "@$(( $(date +%s) - $1 ))" +%Y-%m-%dT%H:%M:%S.000000000Z; }
-started() { printf '{"State":{"Running":true,"StartedAt":"%s"}}' "$(iso_ago "$1")"; }
-# Same second, gateway later by a fraction: whole-second arithmetic called this
-# healthy for ever.
-same_second() { printf '{"State":{"Running":true,"StartedAt":"%sT00:00:00.%09d-05:00"}}' 2026-11-01 "$1"; }
-STOPPED_JSON='{"State":{"Running":false,"StartedAt":"2026-11-01T00:00:00.000000000Z"}}'
-export STUB_SOCK_TOKEN=trentina
-# Agent started after the gateway: its MCP client is current.
-STUB_SOCK="$(started 300)" STUB_SOCK_ALT="$(started 600)" \
-    expect "agent newer than the gateway is OK" 0 "OK .*MCP client is current" any -- "$GS" agent trentina 900
-# Gateway restarted after the agent and is past the grace: the client is gone.
-STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 3600)" \
-    expect "gateway newer, past grace, is CRITICAL" 2 "CRITICAL .*lost its MCP client" any -- "$GS" agent trentina 900
-# Same shape, but the gateway came up seconds ago: a restart sequence in
-# progress must not page.
-STUB_SOCK="$(started 7200)" STUB_SOCK_ALT="$(started 60)" \
-    expect "gateway newer, inside grace, is OK" 0 "OK .*inside the 900s grace" any -- "$GS" agent trentina 900
-STUB_SOCK="$(same_second 100000000)" STUB_SOCK_ALT="$(same_second 900000000)" \
-    expect "gateway later within the same second is still CRITICAL" 2 "CRITICAL .*lost its MCP client" any -- "$GS" agent trentina 900
-STUB_SOCK="$(same_second 900000000)" STUB_SOCK_ALT="$(same_second 100000000)" \
-    expect "agent later within the same second is OK" 0 "OK .*MCP client is current" any -- "$GS" agent trentina 900
-STUB_SOCK="$STOPPED_JSON" STUB_SOCK_ALT="$(started 60)" \
-    expect "a stopped agent is CRITICAL" 2 "CRITICAL .*not running" any -- "$GS" agent trentina 900
-STUB_SOCK="$(started 300)" STUB_SOCK_ALT="$STOPPED_JSON" \
-    expect "a stopped gateway is UNKNOWN, not the agent's fault" 3 "UNKNOWN .*not running" any -- "$GS" agent trentina 900
-STUB_SOCK="$(started 300)" \
-    STUB_SOCK_ALT='{"cause":"no such container","message":"no container with name or ID \"trentina\" found","response":404}' \
-    expect "a missing gateway is UNKNOWN" 3 "UNKNOWN .*no container" any -- "$GS" agent trentina 900
-STUB_SOCK='{"cause":"no such container","message":"no container with name or ID \"agent\" found","response":404}' \
-    expect "a missing agent is CRITICAL, with the whole reason" 2 'CRITICAL .*no container with name or ID "agent" found' any -- "$GS" agent trentina 900
-STUB_SOCK_RC=28 expect "socket timeout is UNKNOWN" 3 "UNKNOWN .*curl exit 28" any -- "$GS" agent trentina 900
-expect "bad container name rejected" 3 "UNKNOWN - invalid container" any -- "$GS" '../../x#' trentina 900
-expect "a non-numeric grace is rejected" 3 "UNKNOWN - grace" any -- "$GS" agent trentina abc
-unset STUB_SOCK_TOKEN
-
 echo "=== check_container_httpd_internal ==="
 IPJSON='{"NetworkSettings":{"IPAddress":"","Networks":{"podman":{"IPAddress":"10.88.0.7"}}}}'
 STUB_SOCK="$IPJSON" STUB_DIRECT="200 0.01" expect "direct success skips exec" 0 "OK .*200" no -- "$HTTP" ctr 80 /

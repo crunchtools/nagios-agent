@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.10.0] - 2026-11-10
+
+### Removed
+
+- `check_agent_gateway_stale.sh` and the four `Agent gateway <seat>` checks
+  (josui, developer1-3). The check paged when the Trentina gateway's container
+  started *after* an agent's, on the premise that a gateway restart silently
+  kills the agent's MCP session and only an agent restart brings it back
+  (RT#1556). Trentina #775 (session adoption) ends that failure mode: on
+  restart the gateway now adopts the session ids its clients are still holding
+  and they carry on working, so "gateway newer than the agent" no longer means
+  a dead client — it only false-positives. All four seats paged after the #775
+  deploy while fully healthy (Josui confirmed its own flagged seat was calling
+  tools normally). The server-side service definitions (`agent-gateway.cfg`)
+  were removed from gloval `/srv` and nagios reloaded separately; this change
+  drops the NRPE command, the plugin, its test block, and its gourmand
+  exception.
+
 ## [9.9.2] - 2026-11-09
 
 ### Fixed
