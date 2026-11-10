@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Deploy drift no longer reports a container as `stale` when only the image
+  index moved. The collector compared the container's `ImageDigest` with the
+  `manifest_digest` Quay holds for the tag, and both are OCI **index**
+  digests. A rebuild at the same commit re-generates the provenance
+  **attestation** manifest, which is a child of the index, so the index digest
+  changes while the runnable per-architecture manifest -- and therefore the
+  image -- is byte for byte what it was. `openclaw:latest` was rebuilt that
+  way on 2026-11-07 and takeda read as stale from then on: it was running the
+  right image, `podman auto-update --dry-run` said there was nothing to apply,
+  and nothing could ever clear the WARNING. Before reporting drift the
+  collector now asks podman whether the tag's current digest is among the
+  RepoDigests of the image the container is actually running, which is podman's
+  own record that the manifest resolved to those bits. One local socket call,
+  taken only on the path that would otherwise report drift; a miss or a failed
+  read still reports `stale`, so it can only clear drift it can prove is not
+  drift.
+
 - Config drift no longer reports `unpublished` for files the mapped repo holds
   byte for byte under another path (e.g. `rootfs/`). The repos collector
   re-tests each unpublished path by content hash against the repo's whole tree.

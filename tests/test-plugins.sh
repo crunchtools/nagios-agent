@@ -780,11 +780,18 @@ STUB
 chmod +x "$STUBS/kick"
 ID=$(printf 'a%.0s' $(seq 64))
 OLD_TS=$(( $(date +%s) - 40 * 3600 ))
-ctr() { # <image-ref> <autoupdate> <digest> [deploy-marker]
-    printf '{"Id":"%s","Name":"svc","ImageName":"%s","ImageDigest":"%s","Config":{"Labels":{"io.containers.autoupdate":"%s","io.crunchtools.deploy":"%s"}}}' \
-        "$ID" "$1" "$3" "$2" "${4:-}"
+IMGID=$(printf 'b%.0s' $(seq 64))
+ctr() { # <image-ref> <autoupdate> <digest> [deploy-marker] [image-id]
+    # Config.Image carries the image REFERENCE under the same key as the
+    # top-level image ID, which is why the collector anchors on 64 hex.
+    printf '{"Id":"%s","Name":"svc","Image":"%s","ImageName":"%s","ImageDigest":"%s","Config":{"Image":"%s","Labels":{"io.containers.autoupdate":"%s","io.crunchtools.deploy":"%s"}}}' \
+        "$ID" "${5:-$IMGID}" "$1" "$3" "$1" "$2" "${4:-}"
 }
 quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}]}' "$1" "$2"; }
+# The image endpoint's answer: which manifests podman has resolved to these
+# exact bits. Reached with STUB_SOCK_TOKEN=images/, which matches that URL and
+# neither the container listing nor the inspect.
+repodigests() { printf '{"Id":"%s","RepoDigests":["%s"]}' "$IMGID" "$1"; }
 # ddcol: one collector run; ddchk: judge its file; dd: both, from scratch
 ddcol() { STATE_DIR="$DDSTATE" "$DDC"; }
 ddchk() { STATE_DIR="$DDSTATE" EXEC="$STUBS/kick" COLLECT=/collector "$DD" "$@"; }
@@ -799,6 +806,44 @@ STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_T
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$(date +%s)") \
     expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
 expect "the grace is the plugin argument, applied at judging time" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- ddchk 0
+# AN INDEX DIGEST THAT MOVED WITHOUT THE IMAGE MOVING. A rebuild at the same
+# commit re-generates the provenance attestation, which is a CHILD of the OCI
+# index, so the index digest changes while the runnable per-architecture
+# manifest does not. Quay reports the new index, the container recorded the
+# old one, and the bits are identical -- which podman knows, because it holds
+# both digests against the one image. openclaw 1.1.3 on 2026-11-07: takeda ran
+# the right image, auto-update agreed there was nothing to apply, and this
+# collector called it stale every run.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:bb) \
+    expect "an index digest that moved with the image unchanged is current" 0 "^DEPLOY DRIFT OK - 1/1 .*clean=1" no -- dd
+# It must not swallow real drift: a tag digest this image was never pulled by
+# is exactly the case the check exists for.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:cc) \
+    expect "a digest the running image never held is still stale" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- dd
+# The repository half of a RepoDigest is load-bearing: the same digest under
+# another name is another image's provenance, not this tag's.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/other/svc@sha256:bb) \
+    expect "the same digest under another repo does not clear drift" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- dd
+# Honesty rule (RT #1481, RT #1488): a read that did not happen never clears
+# drift. The whole point of this path is that it can only prove the negative.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT_RC=22 \
+    expect "an unreadable image read leaves the verdict stale" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- dd
+# The libpod endpoint gives the image id bare; the Docker-compat one gives the
+# same id as sha256:<hex>. Reading the prefixed form must still find the image,
+# or moving this read to the compat path would switch the check above off and
+# quietly restore the false positive. Gatehouse HIGH on #161.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa "" "sha256:$IMGID") STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:bb) \
+    expect "a sha256:-prefixed image id is still resolved" 0 "^DEPLOY DRIFT OK - 1/1 .*clean=1" no -- dd
+# Config.Image holds the image reference under the same key. It must never be
+# mistaken for the image id.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
+    STUB_SOCK_TOKEN=images/ STUB_SOCK_ALT=$(repodigests quay.io/crunchtools/svc@sha256:bb) \
+    expect "the image reference under Config.Image is not read as an id" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
 STUB_SOCK=$(ctr quay.io/crunchtools/svc@sha256:aa "" sha256:aa) \
     expect "digest pin is counted, not drift" 0 "^DEPLOY DRIFT OK - .*pinned=1" no -- dd
 STUB_SOCK=$(ctr ghcr.io/other/svc:latest "" sha256:aa) \
