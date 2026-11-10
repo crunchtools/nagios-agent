@@ -23,10 +23,18 @@
 #   DDRIFT item=<id12> seen=<epoch> kind=BEHIND name=<name> since=<epoch>
 #   DDRIFT end=1
 #
-# CURRENT: the running digest is the one the tag has on Quay. BEHIND: it is
-# not, and since is when Quay moved the tag; the plugin decides whether that
-# is still inside the grace. A container keyed by id: a recreate (which is
-# what podman auto-update does) gets a new id and so a fresh answer.
+# CURRENT: the running image is the one the tag points at. BEHIND: it is not,
+# and since is when Quay moved the tag; the plugin decides whether that is
+# still inside the grace. A container keyed by id: a recreate (which is what
+# podman auto-update does) gets a new id and so a fresh answer.
+#
+# "THE ONE THE TAG POINTS AT" IS NOT THE TAG'S DIGEST. Both the digest podman
+# records on a container and the one Quay reports for a tag are OCI INDEX
+# digests, and an index moves for reasons the image does not. A rebuild at the
+# same commit re-generates the provenance ATTESTATION manifest, which is a
+# child of the index, so the index digest changes while the runnable
+# per-architecture manifest -- and therefore the image -- is byte for byte
+# what it was. Comparing index digests alone called that drift.
 #
 # A container whose Quay read failed this run (UNKNOWN) keeps its previous
 # answer, seen and all; the plugin counts one older than its STALE as
@@ -73,7 +81,7 @@ printf '%s' "$list" | grep -oP '"Id":"\K[0-9a-f]{64}' | sort -u > "$TMP/ids"
 # Workers run concurrently and each prints a single short line, so the lines
 # cannot interleave.
 check_one() {
-    local id=$1 raw name ref auto have img tag body want start
+    local id=$1 raw name ref auto have img tag body want start imgid idig
     raw=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
         "http://localhost/v5.0.0/libpod/containers/${id}/json") || {
         printf '%s UNKNOWN %s\n' "${id:0:12}" "${id:0:12}"; return
@@ -137,10 +145,43 @@ check_one() {
     fi
 
     if [ "$have" = "$want" ]; then
-        printf '%s CURRENT %s\n' "${id:0:12}" "$name"
-    else
-        printf '%s BEHIND %s %s\n' "${id:0:12}" "$name" "$start"
+        printf '%s CURRENT %s\n' "${id:0:12}" "$name"; return
     fi
+
+    # The digests disagree, which is not yet an answer -- see the header. On
+    # 2026-11-07 quay.io/crunchtools/openclaw:latest was rebuilt at the same
+    # commit: the new index pointed at the IDENTICAL amd64 manifest and
+    # differed only in its attestation child. takeda was running the right
+    # image, `podman auto-update --dry-run` said so (UPDATED false), and this
+    # collector reported it BEHIND. Nothing could ever clear that, because
+    # there was nothing to apply -- a permanent WARNING, which is the one
+    # outcome check_deploy_drift.sh's own header says destroys a check.
+    #
+    # So ask podman about the image this container is ACTUALLY running: if the
+    # tag's current digest is among that image's RepoDigests, podman has
+    # already resolved that manifest to these exact bits, and the container is
+    # current however many index digests point at them. A RepoDigest is
+    # podman's own record of a manifest it pulled, so a hit is evidence rather
+    # than an inference.
+    #
+    # One LOCAL socket call, taken only on the path that would otherwise
+    # report drift: the common case is unchanged, no Quay budget is spent, and
+    # a miss or a failed read still reports BEHIND. This can only ever clear
+    # drift it can prove is not drift.
+    imgid=$(printf '%s' "$raw" | grep -oP '"Image":\s*"\K[0-9a-f]{64}' | head -1)
+    if [ -n "$imgid" ]; then
+        idig=$(curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
+            "http://localhost/v5.0.0/libpod/images/${imgid}/json") || idig=""
+        # Anchored on the repository as well as the digest: the same digest
+        # under another repository name is another image's provenance, not
+        # this tag's.
+        case "$idig" in
+            *"\"${PREFIX}${img}@${want}\""*)
+                printf '%s CURRENT %s\n' "${id:0:12}" "$name"; return ;;
+        esac
+    fi
+
+    printf '%s BEHIND %s %s\n' "${id:0:12}" "$name" "$start"
 }
 export -f check_one
 export SOCK QUAY_API NET_TIMEOUT PREFIX
