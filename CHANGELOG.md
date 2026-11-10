@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.9.2] - 2026-11-09
+
 ### Fixed
 
 - Deploy drift no longer reports a container as `stale` when only the image
