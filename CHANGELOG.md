@@ -6,20 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [9.12.0] - 2026-11-11
+## [10.0.0] - 2026-11-11
 
 ### Changed
 
-- `check_image_cve.sh` now pages on CHANGE, not on the standing backlog
-  (RT #1551). A fixable Critical pages (CRITICAL) only when its `(image, CVE)`
-  is NOT in the accepted baseline (`cve-baseline.conf`); a Critical already in
-  the baseline is known, counted as `baselined_crit`, and does not page. A
-  regression — a new CVE, a known CVE surfacing in a new image, or (fail-safe) a
-  counted Critical with no finding line to attribute to a baseline entry —
-  still pages. This replaces the previous count-only routing, which would have
-  paged on the whole known backlog and trained the fleet to ignore the page.
-  The fix for a CRITICAL is a version BUMP (base/dependency), not a same-commit
-  rebuild — stated in the check and the service notes.
+- **BREAKING (verdict threshold).** `check_image_cve.sh` now pages on CHANGE,
+  not on the standing backlog (RT #1551). A fixable Critical pages (CRITICAL)
+  only when its `(image, CVE)` is NOT in the accepted baseline
+  (`cve-baseline.conf`); a Critical already in the baseline is known, counted as
+  `baselined_crit`, and does not page. A regression — a new CVE, a known CVE
+  surfacing in a new image, or (fail-safe) a counted Critical with no finding
+  line to attribute to a baseline entry — still pages. A fixable High still
+  WARNs independently, even on an image that also carries a baselined Critical.
+  This replaces the previous count-only routing, which would have paged on the
+  whole known backlog and trained the fleet to ignore the page. Per the
+  constitution (Plugin Interface Versioning), a change to an existing plugin's
+  verdict thresholds is a MAJOR bump — the Nagios service definitions consume
+  that interface. The fix for a CRITICAL is a version BUMP (base/dependency),
+  not a same-commit rebuild — stated in the check and the service notes.
 
 ### Added
 

@@ -166,6 +166,8 @@ for img in "${expected[@]}"; do
     img_new=$(( ${#new_cves[@]} + unaccounted ))
 
     if [ "$img_new" -ge 1 ]; then
+        # A NEW Critical outranks everything else on this image; it pages, and a
+        # High on the same image is moot (CRITICAL already wins the verdict).
         tot_new_crit=$(( tot_new_crit + img_new ))
         label="$(basename "$ref")($img_new)"
         # Name the first new CVE's bump, so the page text is actionable at a glance.
@@ -174,12 +176,14 @@ for img in "${expected[@]}"; do
             label="$label ${new_cves[0]}${d:+ [$d]}"
         fi
         crit_imgs+=("$label")
-    elif [ "$seen_findings" -ge 1 ]; then
-        base_hits+=("$(basename "$ref")($seen_findings)")   # baselined-only: known, non-paging
-    elif [ "$fh" -ge 1 ]; then
-        warn_imgs+=("$(basename "$ref")($fh)")
     else
-        ok_n=$(( ok_n + 1 ))
+        # Not paging on this image. A baselined Critical and a fixable High are
+        # independent: an image can carry both, so surface each — the High must
+        # still WARN even when the image also has an accepted Critical. Only an
+        # image with neither is clean.
+        [ "$seen_findings" -ge 1 ] && base_hits+=("$(basename "$ref")($seen_findings)")
+        [ "$fh" -ge 1 ] && warn_imgs+=("$(basename "$ref")($fh)")
+        [ "$seen_findings" -eq 0 ] && [ "$fh" -eq 0 ] && ok_n=$(( ok_n + 1 ))
     fi
 done
 

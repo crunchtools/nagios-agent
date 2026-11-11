@@ -1536,6 +1536,15 @@ icstat "$ICDB" \
   "$(icline quay.io/crunchtools/beta:latest 0 0)"
 expect "a counted Critical with no finding line is NEW (fail-safe)" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image.*alpha:latest\(1\)" no -- ic
 
+# An image with BOTH a baselined Critical and a fixable High: the Critical is
+# accepted (does not page) but the High must still WARN — the two are independent.
+printf 'quay.io/crunchtools/alpha:latest CVE-TEST-0001\n' > "$ICBASE"
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 1 1)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a fixable High still WARNs on an image with a baselined Critical" 1 "^WARNING - fixable High CVE in 1 image.*alpha:latest\(1\).*baselined: alpha:latest\(1\)" no -- ic
+
 # A stale baseline entry (a CVE no scan shows any more) never matches: harmless,
 # surfaced as stale_baseline so the backlog can be pruned, never a page.
 printf 'quay.io/crunchtools/alpha:latest CVE-GONE-0000\n' > "$ICBASE"
