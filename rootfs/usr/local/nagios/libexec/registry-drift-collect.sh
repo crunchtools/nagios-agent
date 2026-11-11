@@ -1,8 +1,8 @@
 #!/bin/bash
 # registry-drift-collect.sh — registry drift reads off the NRPE hot path (7.1.0)
 #
-# THE PROBLEM. check_registry_drift.sh made ~170 network calls against GitHub,
-# Quay and GHCR on every run, inside check_nrpe's 45s ceiling. Parallel workers
+# THE PROBLEM. check_registry_drift.sh made ~170 network calls against GitHub
+# and the registries on every run, inside check_nrpe's 45s ceiling. Parallel workers
 # got it to ~10s, but a slow registry still turned into "CRITICAL - Socket
 # timeout" (31 CRITICALs in the Nagios log), which says nothing about drift.
 #
@@ -21,7 +21,7 @@
 #   RDRIFT item=<image> seen=<epoch> kind=CLEAN|SKIPPED
 #   RDRIFT item=<image> seen=<epoch> kind=UNTAGGED value=<repo>
 #   RDRIFT item=<image> seen=<epoch> kind=MISSING value=<image>:<tag>[<registries>] since=<epoch|0>
-#   RDRIFT item=<image> seen=<epoch> kind=UNKNOWN value=<image>(git|quay|ghcr|budget)
+#   RDRIFT item=<image> seen=<epoch> kind=UNKNOWN value=<image>(git|quay|budget)
 #   RDRIFT end=1
 #
 # An image that could not be read this run (UNKNOWN) keeps its previous
@@ -36,7 +36,6 @@ set -uo pipefail
 
 CONF=${REGISTRY_DRIFT_CONF:-/etc/nagios/registry-images.conf}
 QUAY_API=${QUAY_API:-https://quay.io/api/v1}
-GHCR=${GHCR:-https://ghcr.io}
 ORG=${REGISTRY_DRIFT_ORG:-crunchtools}
 GIT_HOST=${REGISTRY_DRIFT_GIT_HOST:-https://github.com}
 NET_TIMEOUT=${REGISTRY_DRIFT_TIMEOUT:-15}
@@ -78,7 +77,7 @@ newest_tag() {
     return 0
 }
 
-# Quay and GHCR are inconsistent about the v prefix: a git tag of v0.7.0 is
+# Quay is inconsistent about the v prefix: a git tag of v0.7.0 is
 # published as 0.7.0 on Quay, and some images carry both. Accept either.
 tag_present() {
     local tags=$1 want=$2
@@ -103,15 +102,6 @@ quay_body() {
 
 quay_names() { printf '%s' "$1" | grep -oP '"name":\s*"\K[^"]+'; }
 
-# start_ts of tag <want> (or v<want>) in a Quay tag listing. Tag objects can
-# nest (child_manifests_presence), so split the listing at each tag's "name"
-# key rather than at braces: each piece is then one tag's fields.
-quay_start() {
-    printf '%s' "$1" | sed 's/{"name"/\n{"name"/g' \
-        | grep -E "^\{\"name\":\s*\"v?${2//./\\.}\"" \
-        | grep -oP '"start_ts":\s*\K[0-9]+' | head -1
-}
-
 # Created epoch of a local image tagged <img>:<tag> on either registry, from
 # the image list fetched once into $LOCAL_IMAGES. sqlite3 reads the JSON (the
 # image has no jq); <img> is checked against a strict pattern before it is
@@ -121,35 +111,19 @@ local_created() {
     [ -s "${LOCAL_IMAGES:-}" ] || return 0
     command -v sqlite3 >/dev/null || return 0
     [[ $img =~ ^[a-z0-9._-]+$ && $tag =~ ^[0-9.]+$ ]] || return 0
-    for r in "quay.io/${ORG}/${img}" "ghcr.io/${ORG}/${img}"; do
-        refs="${refs:+$refs,}'$r:$tag','$r:v$tag'"
-    done
+    r="quay.io/${ORG}/${img}"
+    refs="'$r:$tag','$r:v$tag'"
     sqlite3 :memory: "SELECT coalesce(max(json_extract(i.value,'\$.Created')),'')
         FROM json_each(CAST(readfile('$LOCAL_IMAGES') AS TEXT)) i,
              json_each(i.value,'\$.RepoTags') t
         WHERE t.value IN ($refs)" 2>/dev/null | grep -E '^[0-9]+$'
 }
 
-ghcr_tags() {
-    local img=$1 token body
-    # Anonymous pull token. Every image checked here is public; the one private
-    # package in the org belongs to the repo this plugin deliberately skips.
-    token=$(curl -sf --max-time "$NET_TIMEOUT" \
-        "${GHCR}/token?scope=repository:${ORG}/${img}:pull&service=ghcr.io" \
-        | grep -oP '"token":\s*"\K[^"]+') || return 1
-    [ -n "$token" ] || return 1
-    # ghcr pages tags/list at 100 by default; ask for everything in one page.
-    body=$(curl -sf --max-time "$NET_TIMEOUT" -H "Authorization: Bearer ${token}" \
-        "${GHCR}/v2/${ORG}/${img}/tags/list?n=10000") || return 1
-    printf '%s' "$body" | grep -oP '"tags":\s*\[\K[^]]*' | tr ',' '\n' | tr -d ' "'
-    return 0
-}
-
 # One image in, one verdict line out, led by the image name. Everything network-bound lives in here so
 # the images can be checked concurrently; the verdicts are tallied afterwards by
 # a single reader, which keeps the counting logic sequential and easy to follow.
 check_one() {
-    local repo=$1 img=$2 flag=${3:-} tag gaps qb qt gt since
+    local repo=$1 img=$2 flag=${3:-} tag gaps qb qt since
 
     # A fork's git tags are upstream's releases, not versions of the image we
     # publish, so there is nothing here to compare. Quay staleness covers them.
@@ -178,23 +152,18 @@ check_one() {
         return
     fi
 
-    if gt=$(ghcr_tags "$img"); then
-        tag_present "$gt" "$tag" || gaps="${gaps:+$gaps+}ghcr"
-    else
-        printf '%s UNKNOWN %s(ghcr)\n' "$img" "$img"
-        return
-    fi
+    # Quay is the only registry (constitution III, 1.39.0): GHCR was dropped
+    # fleet-wide on 2026-11-11, so a release missing there is not drift.
 
     if [ -n "$gaps" ]; then
         since=""
-        [ "$gaps" = ghcr ] && since=$(quay_start "$qb" "$tag")
-        [ -n "$since" ] || since=$(local_created "$img" "$tag")
+        since=$(local_created "$img" "$tag")
         printf '%s MISSING %s:%s[%s] %s\n' "$img" "$img" "$tag" "$gaps" "${since:-0}"
     else
         printf '%s CLEAN\n' "$img"
     fi
 }
-export -f check_one newest_tag quay_body quay_names quay_start local_created ghcr_tags tag_present
+export -f check_one newest_tag quay_body quay_names local_created tag_present
 
 # One read of the local image list for local_created(). Failure just means no
 # local dates, so every missing image without a Quay date counts as aged.
@@ -203,7 +172,7 @@ if [ -S "$SOCK" ]; then
     curl -sf --max-time "$NET_TIMEOUT" --unix-socket "$SOCK" \
         "http://localhost/v5.0.0/libpod/images/json" > "$LOCAL_IMAGES" 2>/dev/null || : > "$LOCAL_IMAGES"
 fi
-export QUAY_API GHCR ORG GIT_HOST NET_TIMEOUT LOCAL_IMAGES
+export QUAY_API ORG GIT_HOST NET_TIMEOUT LOCAL_IMAGES
 
 # One line per image, deduplicated so a doubled conf line is not counted twice.
 grep -vE '^[[:space:]]*(#|$)' "$CONF" | awk '!seen[$1" "$2]++' > "$TMP/images"

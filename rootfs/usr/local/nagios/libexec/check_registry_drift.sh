@@ -33,14 +33,17 @@
 # and hermes pages on CRITICAL only (contacts.cfg, service_notification_options
 # c). This should nag from the dashboard, not wake anyone.
 #
-# GRACE (7.0.0). A release is missing from a registry for a while by design:
-# the tag lands on GitHub, CI builds, Quay gets the image, then GHCR. Warning
-# in that window was noise, so a "missing" image is dated and stays OK for
-# REGISTRY_DRIFT_WARN seconds (4h). The date comes from what can be read
-# without a token or state: Quay's start_ts for the tag when Quay has it (the
-# gap is GHCR, which follows Quay), else the Created time of a local image
-# carrying that tag (podman socket), else none, which counts as aged and warns
-# at once as before. "untagged" has no release to date and always warns.
+# QUAY ONLY (constitution 1.39.0, RT#1550). GHCR was dropped fleet-wide on
+# 2026-11-11; the history above is why this check exists, but a release now
+# has one home, and "missing" means missing from Quay.
+#
+# GRACE (7.0.0). A release is missing from Quay for a while by design: the tag
+# lands on GitHub, then the release workflow copies the gated digest to its
+# version tags. Warning in that window was noise, so a "missing" image is dated
+# and stays OK for REGISTRY_DRIFT_WARN seconds (4h). The date is the Created
+# time of a local image carrying that tag (podman socket), else none, which
+# counts as aged and warns at once. "untagged" has no release to date and
+# always warns.
 #
 # HONESTY RULE (RT #1481, RT #1488). Never report OK for a comparison that did
 # not happen. Every git or registry call that fails is counted as unknown and

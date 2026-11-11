@@ -31,7 +31,7 @@ daemon is the sole witness to its own death.
 3. **Supply chain** — Quay tag staleness and whether an image is being pulled
    from the source you think it is. `check_quay_staleness.sh`,
    `check_quay_pull_source.sh`. Whether every image's newest release reached
-   Quay and GHCR, `check_registry_drift.sh`.
+   Quay (the only registry since constitution 1.39.0), `check_registry_drift.sh`.
 4. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
    credential. `check_google_oauth.sh`. Postiz channel tokens, read from its
