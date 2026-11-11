@@ -25,6 +25,12 @@ All notable changes to this project are documented here. The format follows
   that interface. The fix for a CRITICAL is a version BUMP (base/dependency),
   not a same-commit rebuild — stated in the check and the service notes.
 
+- The `Fleet image CVEs` service sets `notification_options c,u,r` (not the
+  template's `w,u,c,r`): a fixable High (WARNING) is visible but does not page —
+  it has no baseline, so paging on the fleet-wide High backlog would reintroduce
+  the alert-fatigue the Critical baseline prevents. CRITICAL and UNKNOWN (a
+  silently-dead scanner) page; RECOVERY closes the loop.
+
 ### Added
 
 - `cve-baseline.conf` — the accepted `(image, CVE)` baseline, mounted into the
