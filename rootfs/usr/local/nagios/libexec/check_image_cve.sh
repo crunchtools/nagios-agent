@@ -86,7 +86,7 @@ while IFS= read -r line; do
     # The item value becomes a map KEY; validate it against the image-ref grammar
     # first. An unvalidated array subscript is a command-injection surface on some
     # bash versions — the array-key analogue of the arithmetic validation above.
-    [[ $iref =~ ^[A-Za-z0-9._:/-]+$ ]] || continue
+    [[ $iref =~ ^[A-Za-z0-9._:/@-]+$ ]] || continue   # @ for digest-pinned refs
     sresult[$iref]=$(cl_field result "$line")
     sfcrit[$iref]=$(cl_field fix_crit "$line")
     sfhigh[$iref]=$(cl_field fix_high "$line")
