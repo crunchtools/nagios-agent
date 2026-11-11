@@ -1,0 +1,45 @@
+# Build once, gate the digest, promote what was tested (constitution v1.39.1,
+# RT#1550). The pull request builds and gates; the merge promotes that digest
+# to :main with no rebuild; a v* tag copies it to the version tags and :latest.
+# Quay.io is the only registry.
+#
+# Gate: tests/test-image.sh against the pushed digest. It checks the shipped
+# plugins and config, runs the offline plugin tests, then starts the real
+# entrypoint (nrpe -f) and requires the process to run and port 5666 to listen.
+name: Container
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  schedule:
+    - cron: "0 8 * * 1"  # Weekly Monday rebuild
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # Blocking AI-slop gate, required by constitution XII.
+  gourmand:
+    name: Code Quality (Gourmand)
+    uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0
+
+  container:
+    uses: crunchtools/constitution/.github/workflows/container-release.yml@v1.39.1
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      image: quay.io/crunchtools/nagios-agent
+      default-branch: master
+      rhsm: true
+      boot: command
+      boot-command: |
+        command -v gawk >/dev/null || sudo apt-get install -y gawk
+        bash tests/test-image.sh
+    secrets:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+      RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+      RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
