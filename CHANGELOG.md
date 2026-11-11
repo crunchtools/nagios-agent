@@ -6,7 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [9.10.0] - 2026-11-10
+## [9.10.0] - 2026-11-11
+
+### Changed
+
+- Registry drift reads Quay only. GHCR is dropped fleet-wide (RT#1550), so
+  the GHCR tag listing and the Quay-vs-GHCR comparison are gone.
+- The image is built once per change and promoted by digest through
+  constitution's container-release workflow (RT#1550): the merge copies the
+  pull request's gated digest to `:main` and a `v*` tag copies it to
+  `:latest`. Nagios no longer rebuilds on merge.
 
 ### Removed
 
