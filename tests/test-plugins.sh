@@ -1476,6 +1476,11 @@ expect "a listed image with result=error is a coverage gap (UNKNOWN)" 3 "^UNKNOW
 { echo "CVE generated=$(date +%s) db_built=$ICDB db_age_days=0 db_updated=1 images=2 elapsed=5"
   icline quay.io/crunchtools/alpha:latest 0 0; } > "$ICSTAT"   # deliberately no "CVE end=1"
 expect "a file missing CVE end=1 is UNKNOWN (truncated)" 3 "is truncated" no -- ic
+# A non-numeric timestamp must be rejected, not fed to bash arithmetic (a status
+# plugin must not trust a file's shape; $(( )) evaluates array subscripts).
+{ echo 'CVE generated=x[$(id)] db_built='"$ICDB"' db_age_days=0 images=2'
+  icline quay.io/crunchtools/alpha:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
+expect "a malformed generated field is UNKNOWN, not evaluated" 3 "malformed generated field" no -- ic
 
 echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"

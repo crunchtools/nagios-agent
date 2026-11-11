@@ -46,7 +46,13 @@ grep -qx "CVE end=1" <<<"$raw" || { echo "UNKNOWN - scan file $STATUS is truncat
 header=$(grep -m1 '^CVE generated=' <<<"$raw")
 generated=$(cl_field generated "$header")
 db_built=$(cl_field db_built "$header")
-: "${generated:=0}" "${db_built:=0}"
+# Validate before any arithmetic: a non-numeric value inside $(( )) is a
+# code-execution vector — bash evaluates array subscripts there, and a subscript
+# can carry a command substitution. cve.status is written by a trusted root
+# oneshot, but a status plugin must not trust a file's shape; a malformed field
+# is UNKNOWN, never a shell. fix_crit/fix_high are validated the same way below.
+[[ $generated =~ ^[0-9]+$ ]] || { echo "UNKNOWN - $STATUS: malformed generated field"; exit 3; }
+[[ $db_built  =~ ^[0-9]+$ ]] || { echo "UNKNOWN - $STATUS: malformed db_built field"; exit 3; }
 
 file_age=$(( now - generated ))
 if [ "$generated" -eq 0 ] || [ "$file_age" -ge "$FILE_STALE" ]; then
@@ -68,16 +74,26 @@ mapfile -t expected < <(grep -vE '^[[:space:]]*(#|$)' "$FLEET_LIST" | awk '{prin
 crit_imgs=(); warn_imgs=(); gap_imgs=()
 tot_fix_crit=0; tot_fix_high=0; ok_n=0
 
+# Parse every scan item line ONCE into associative arrays keyed by image ref,
+# then look each expected image up in O(1) — O(N) overall, not O(N^2). cl_field
+# reads the item= value up to the next space, so the key is the exact ref.
+declare -A sresult sfcrit sfhigh
+while IFS= read -r line; do
+    iref=$(cl_field item "$line")
+    [ -n "$iref" ] || continue
+    sresult[$iref]=$(cl_field result "$line")
+    sfcrit[$iref]=$(cl_field fix_crit "$line")
+    sfhigh[$iref]=$(cl_field fix_high "$line")
+done < <(grep '^CVE item=' <<<"$raw")
+
 for img in "${expected[@]}"; do
     ref=$img; [[ $ref == *:* ]] || ref="$ref:latest"
-    # Trailing space is deliberate and load-bearing: the writer always emits
-    # "CVE item=<ref> seen=...", so the match is guaranteed to hit, and the space
-    # stops a prefix collision (item=.../rt must not match item=.../rtv).
-    line=$(grep -m1 -F "CVE item=$ref " <<<"$raw")
-    if [ -z "$line" ]; then gap_imgs+=("$ref"); continue; fi
-    if [ "$(cl_field result "$line")" != "ok" ]; then gap_imgs+=("$ref"); continue; fi
-    fc=$(cl_field fix_crit "$line"); fh=$(cl_field fix_high "$line")
-    : "${fc:=0}" "${fh:=0}"
+    if [ -z "${sresult[$ref]+set}" ] || [ "${sresult[$ref]}" != "ok" ]; then
+        gap_imgs+=("$ref"); continue
+    fi
+    fc=${sfcrit[$ref]}; fh=${sfhigh[$ref]}
+    [[ $fc =~ ^[0-9]+$ ]] || fc=0    # validate before arithmetic (see note above)
+    [[ $fh =~ ^[0-9]+$ ]] || fh=0
     tot_fix_crit=$(( tot_fix_crit + fc )); tot_fix_high=$(( tot_fix_high + fh ))
     if   [ "$fc" -ge 1 ]; then crit_imgs+=("$(basename "$ref")($fc)")
     elif [ "$fh" -ge 1 ]; then warn_imgs+=("$(basename "$ref")($fh)")
