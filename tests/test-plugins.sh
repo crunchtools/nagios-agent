@@ -1435,6 +1435,38 @@ rm -f "$QSTAT"
 expect "missing status is UNKNOWN and starts the collector" 3 "^UNKNOWN - collector stale: no status file .*collector started" yes -- rchk "$QS" example/alpha 8 latest
 expect "bad repo argument is rejected" 3 "^UNKNOWN - usage" no -- rchk "$QS" '../x' 8 latest
 
+echo "=== check_image_cve (RT #1551) ==="
+IC="$LIBEXEC/check_image_cve.sh"
+ICSTAT="$RSTATE/cve.status"
+ICFLEET="$RSTUBS/cve-fleet.conf"
+printf 'quay.io/crunchtools/alpha\nquay.io/crunchtools/beta\n' > "$ICFLEET"
+# ic: run the check with the fleet list as its argument, STATE_DIR -> $RSTATE
+ic() { rchk "$IC" "$ICFLEET"; }
+# icline <ref> <fix_crit> <fix_high>: one result=ok item line
+icline() { echo "CVE item=$1 seen=$(date +%s) source=podman result=ok total=10 crit=0 high=0 med=5 fix_crit=$2 fix_high=$3 unfix=5 rce=0"; }
+# icstat <db_built> <item-lines...>: write cve.status with a fresh generated= time
+icstat() { local db=$1; shift; { echo "CVE generated=$(date +%s) db_built=$db db_age_days=0 db_updated=1 images=2 elapsed=5"; for l in "$@"; do echo "$l"; done; echo "CVE end=1"; } > "$ICSTAT"; }
+ICDB=$(( $(date +%s) - 3600 ))       # DB built 1h ago — fresh
+ICDB_OLD=$(( $(date +%s) - 200000 )) # DB built ~55h ago — stale
+
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "no fixable crit/high is OK" 0 "^OK - no fixable Critical/High CVEs across 2 fleet image" no -- ic
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 2 0)" "$(icline quay.io/crunchtools/beta:latest 0 1)"
+expect "a fixable Critical is CRITICAL and outranks a warning" 2 "^CRITICAL - fixable Critical CVE in 1 image" no -- ic
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 2)"
+expect "only a fixable High is WARNING" 1 "^WARNING - fixable High CVE in 1 image" no -- ic
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)"
+expect "a listed image absent from the scan is UNKNOWN" 3 "^UNKNOWN - 1 listed image.* absent from the scan" no -- ic
+icstat "$ICDB_OLD" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a vulnerability DB older than 48h is UNKNOWN" 3 "^UNKNOWN - scanner vulnerability DB is stale" no -- ic
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 1 0)"
+expect "a real page is not masked by a coverage gap" 2 "^CRITICAL - fixable Critical CVE in 1 image" no -- ic
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
+age_status "$ICSTAT" 40000
+expect "a scan older than 9h is UNKNOWN" 3 "^UNKNOWN - scan is stale" no -- ic
+rm -f "$ICSTAT"
+expect "a missing scan file is UNKNOWN" 3 "^UNKNOWN - no scan:" no -- ic
+
 echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"
 GO="$LIBEXEC/check_google_oauth.sh"
