@@ -1457,11 +1457,11 @@ ICDB=$(( $(date +%s) - 3600 ))       # DB built 1h ago — fresh
 ICDB_OLD=$(( $(date +%s) - 200000 )) # DB built ~55h ago — stale
 
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
-expect "no fixable crit/high is OK" 0 "^OK - no NEW fixable Critical/High CVEs across 2 fleet image" no -- ic
+expect "no fixable crit/high is OK" 0 "^OK - no NEW fixable Critical across 2 fleet image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 2 0)" "$(icline quay.io/crunchtools/beta:latest 0 1)"
 expect "a fixable Critical is CRITICAL and outranks a warning" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 2)"
-expect "only a fixable High is WARNING" 1 "^WARNING - fixable High CVE in 1 image" no -- ic
+expect "a fixable High alone is OK (does not page), named + counted" 0 "^OK - no NEW fixable Critical.*2 fixable High across 1 image\(s\), worked via enqueue" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)"
 expect "a listed image absent from the scan is UNKNOWN" 3 "^UNKNOWN - 1 listed image.* absent from the scan" no -- ic
 icstat "$ICDB_OLD" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
@@ -1536,14 +1536,15 @@ icstat "$ICDB" \
   "$(icline quay.io/crunchtools/beta:latest 0 0)"
 expect "a counted Critical with no finding line is NEW (fail-safe)" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image.*alpha:latest\(1\)" no -- ic
 
-# An image with BOTH a baselined Critical and a fixable High: the Critical is
-# accepted (does not page) but the High must still WARN — the two are independent.
+# An image with BOTH a baselined Critical and a fixable High is OK: the Critical
+# is accepted (does not page) and the High never pages either (worked via
+# enqueue) — but both are named in the OK line. No WARNING tier.
 printf 'quay.io/crunchtools/alpha:latest CVE-TEST-0001\n' > "$ICBASE"
 icstat "$ICDB" \
   "$(icline quay.io/crunchtools/alpha:latest 1 1)" \
   "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
   "$(icline quay.io/crunchtools/beta:latest 0 0)"
-expect "a fixable High still WARNs on an image with a baselined Critical" 1 "^WARNING - fixable High CVE in 1 image.*alpha:latest\(1\).*baselined: alpha:latest\(1\)" no -- ic
+expect "a baselined Critical + a fixable High is OK (both named, neither pages)" 0 "^OK - no NEW fixable Critical.*1 fixable High across 1 image\(s\), worked via enqueue.*baselined: alpha:latest\(1\)" no -- ic
 
 # A stale baseline entry (a CVE no scan shows any more) never matches: harmless,
 # surfaced as stale_baseline so the backlog can be pruned, never a page.
