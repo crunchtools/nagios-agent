@@ -1127,8 +1127,6 @@ for a in "$@"; do
                 exit 0
             fi
             printf '%s' "${STUB_QUAY:-}"; exit 0 ;;
-        */token*) printf '{"token":"t"}'; exit 0 ;;
-        */tags/list*) printf '%s' "${STUB_GHCR:-}"; exit 0 ;;
     esac
 done
 exit 22
@@ -1151,54 +1149,52 @@ rd() { rm -f "$RDSTAT"; rdcol; rdchk; }
 quayj() { # <start_ts> [name]: a tag listing shaped like Quay's, nested object included
     printf '{"tags": [{"name": "%s", "reversion": false, "start_ts": %s, "child_manifests_presence": {"sha256:aa": true}}, {"name": "latest", "start_ts": 1}]}' "${2:-1.2.0}" "$1"
 }
-GH_HAS='{"name":"crunchtools/svc","tags":["1.2.0","latest"]}'
-GH_NOT='{"name":"crunchtools/svc","tags":["1.1.0","latest"]}'
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" \
-    expect "both registries carry the tag" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" \
-    expect "GHCR lagging a 1h-old Quay push is within grace" 0 "^REGISTRY DRIFT OK - drift 1h, within grace \\(warn after 4h\\): 1/1 .*in grace: svc:1.2.0\\[ghcr\\]" any -- rd
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 18000)))" STUB_GHCR="$GH_NOT" \
-    expect "GHCR lagging a 5h-old Quay push is WARNING" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" any -- rd
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" REGISTRY_DRIFT_WARN=600 \
-    expect "REGISTRY_DRIFT_WARN overrides the grace" 1 "^REGISTRY DRIFT WARNING - " any -- rd
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" STUB_GHCR="$GH_HAS" \
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" \
+    expect "Quay carries the tag" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
+# GHCR was dropped fleet-wide (constitution 1.39.0): a release that is on Quay
+# and nowhere else is clean, however long ago it was pushed.
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 18000)))" \
+    expect "a release on Quay only is not drift" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" \
     expect "missing from Quay with no local image warns at once" 1 "^REGISTRY DRIFT WARNING - .*missing: svc:1.2.0\\[quay\\]" any -- rd
 if command -v sqlite3 >/dev/null; then
-    STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" STUB_GHCR="$GH_HAS" \
-        STUB_LOCAL="[{\"Id\":\"x\",\"RepoTags\":[\"ghcr.io/crunchtools/svc:1.2.0\"],\"Created\":$((T - 1200)),\"Labels\":{\"a\":\"b\"}}]" \
+    STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" \
+        STUB_LOCAL="[{\"Id\":\"x\",\"RepoTags\":[\"quay.io/crunchtools/svc:1.2.0\"],\"Created\":$((T - 1200)),\"Labels\":{\"a\":\"b\"}}]" \
         expect "missing from Quay, dated by a local image, is within grace" 0 "^REGISTRY DRIFT OK - drift 20m, within grace" any -- rd
 fi
-STUB_TAG="" STUB_QUAY="$(quayj 1)" STUB_GHCR="$GH_HAS" \
+STUB_TAG="" STUB_QUAY="$(quayj 1)" \
     expect "untagged repo always warns" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 1 untagged" any -- rd
 # Quay is asked for the release tag by name, so tags pushed after it (rotv
 # tags every commit) can't page it out of view.
 export STUB_QUAY_LOG="$GSTUBS/quay.log"
-rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="1.2.0" STUB_GHCR="$GH_HAS" \
+rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="1.2.0" \
     expect "the release tag is found by name" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
 ok_if "a found bare tag needs one Quay request" [ "$(cat "$STUB_QUAY_LOG")" = "1.2.0" ]
-rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="v1.2.0" STUB_GHCR="$GH_HAS" \
+rm -f "$STUB_QUAY_LOG"; STUB_TAG=1.2.0 STUB_QUAY_HAS="v1.2.0" \
     expect "a v-prefixed release tag is found" 0 "^REGISTRY DRIFT OK - 1/1 images carry" any -- rd
 ok_if "the v-prefixed tag is asked for after the bare one" [ "$(tr '\n' ' ' < "$STUB_QUAY_LOG")" = "1.2.0 v1.2.0 " ]
-STUB_TAG=1.2.0 STUB_QUAY_HAS="" STUB_GHCR="$GH_HAS" \
+STUB_TAG=1.2.0 STUB_QUAY_HAS="" \
     expect "a tag Quay has under neither name is missing" 1 "^REGISTRY DRIFT WARNING - .*missing: svc:1.2.0\\[quay\\]" any -- rd
-STUB_TAG=1.2.0 STUB_QUAY_HAS="" STUB_QUAY_FAIL_V=1 STUB_GHCR="$GH_HAS" \
+STUB_TAG=1.2.0 STUB_QUAY_HAS="" STUB_QUAY_FAIL_V=1 \
     expect "a failed v-prefixed lookup is UNKNOWN, not missing" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(quay\\)" any -- rd
 echo "=== registry-drift-collect (status file, kick) ==="
 printf 'svc svc\nsvc svc\n' > "$GSTUBS/images.conf"
-STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" \
+STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" \
     expect "a doubled conf line is counted once" 0 "^REGISTRY DRIFT OK - 1/1 images carry .* collected_age=" no -- rd
 echo "svc svc" > "$GSTUBS/images.conf"
 # The grace is measured when the file is judged, not when it was written.
-rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 3600)))" STUB_GHCR="$GH_NOT" rdcol
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" rdcol
+sed -i -E "s/since=[0-9]+/since=$((T - 3600))/" "$RDSTAT"
 expect "drift inside the grace is OK" 0 "^REGISTRY DRIFT OK - drift 1h, within grace" no -- rdchk
+REGISTRY_DRIFT_WARN=600 expect "REGISTRY_DRIFT_WARN overrides the grace" 1 "^REGISTRY DRIFT WARNING - " no -- rdchk
 sed -i -E "s/since=[0-9]+/since=$((T - 18000))/" "$RDSTAT"
 expect "the same drift past the grace is WARNING with no new read" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" no -- rdchk
-rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 18000)))" STUB_GHCR="$GH_NOT" rdcol
-STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 STUB_GHCR="$GH_NOT" rdcol
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj 1 1.1.0)" rdcol
+STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 rdcol
 expect "an unreadable registry keeps the last answer" 1 "^REGISTRY DRIFT WARNING - 1/1 images drifted: 0 untagged, 1 missing" no -- rdchk
 sed -i -E "/item=svc /s/seen=[0-9]+/seen=$((T - 11000))/" "$RDSTAT"
 expect "an answer older than STALE counts as unreadable" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(stale\\)" no -- rdchk
-rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 STUB_GHCR="$GH_NOT" rdcol
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY_FAIL=1 rdcol
 expect "first-ever unreadable registry is UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - 1/1 images could not be checked. unreadable: svc\\(quay\\)" no -- rdchk
 T0=$SECONDS
 rm -f "$RDSTAT"; STUB_GIT_SLOW=1 BUDGET=1 REGISTRY_DRIFT_TIMEOUT=2 rdcol
@@ -1207,7 +1203,7 @@ expect "an image the budget cut off is UNKNOWN by name" 3 "unreadable: svc\\(bud
 # Answers are matched to images by name: a finished image keeps its answer
 # beside one the budget cut off, and a name the conf rule rejects is dropped.
 printf 'svc svc\nslow slow\nbad bad/x\n' > "$GSTUBS/images.conf"
-rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" STUB_GIT_SLOW_REPO=slow BUDGET=2 REGISTRY_DRIFT_TIMEOUT=3 rdcol
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GIT_SLOW_REPO=slow BUDGET=2 REGISTRY_DRIFT_TIMEOUT=3 rdcol
 expect "answers are matched by image, missing ones UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - 1/2 images could not be checked. unreadable: slow\\(budget\\)" no -- rdchk
 ok_if "finished image keeps its own answer" grep -q '^RDRIFT item=svc seen=[0-9]* kind=CLEAN$' "$RDSTAT"
 ok_if "an image name the conf rule rejects is not recorded" bash -c '! grep -q "item=bad" "$0"' "$RDSTAT"
@@ -1215,7 +1211,7 @@ echo "svc svc" > "$GSTUBS/images.conf"
 rm -f "$RDSTAT"
 PATH="$GSTUBS:$PATH" STATE_DIR="$RDSTATE" REGISTRY_DRIFT_CONF=/nonexistent "$RDC"
 expect "unreadable image list is UNKNOWN" 3 "^REGISTRY DRIFT UNKNOWN - cannot read image list" no -- rdchk
-rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" STUB_GHCR="$GH_HAS" rdcol
+rm -f "$RDSTAT"; STUB_TAG=1.2.0 STUB_QUAY="$(quayj $((T - 100)))" rdcol
 sed -i -E "s/generated=[0-9]+/generated=$((T - 2000))/" "$RDSTAT"
 expect "status past REFRESH is still judged and starts the collector" 0 "^REGISTRY DRIFT OK" yes -- rdchk
 sed -i -E "s/generated=[0-9]+/generated=$((T - 11000))/" "$RDSTAT"
