@@ -32,7 +32,7 @@ set -uo pipefail
 . "$(dirname "$0")/collector-lib.sh" || { echo "UNKNOWN - cannot load collector-lib.sh"; exit 3; }
 
 STATUS=${STATUS:-$STATE_DIR/cve.status}
-FLEET_LIST=${1:-${FLEET_LIST:-/etc/nagios/fleet-images.conf}}
+FLEET_LIST=${1:-${FLEET_LIST:-/etc/nagios/cve-fleet-images.conf}}
 FILE_STALE=${FILE_STALE:-32400}     # 9h: one missed 6h run plus slack
 DB_STALE=${DB_STALE:-172800}        # 48h
 

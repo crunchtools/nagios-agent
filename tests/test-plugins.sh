@@ -1466,6 +1466,16 @@ age_status "$ICSTAT" 40000
 expect "a scan older than 9h is UNKNOWN" 3 "^UNKNOWN - scan is stale" no -- ic
 rm -f "$ICSTAT"
 expect "a missing scan file is UNKNOWN" 3 "^UNKNOWN - no scan:" no -- ic
+# A listed image that failed to scan (result=error) is a coverage gap, not a pass.
+{ echo "CVE generated=$(date +%s) db_built=$ICDB db_age_days=0 db_updated=1 images=2 elapsed=5"
+  icline quay.io/crunchtools/alpha:latest 0 0
+  echo "CVE item=quay.io/crunchtools/beta:latest seen=$(date +%s) result=error msg=scan_failed"
+  echo "CVE end=1"; } > "$ICSTAT"
+expect "a listed image with result=error is a coverage gap (UNKNOWN)" 3 "^UNKNOWN - 1 listed image.* absent from the scan or failed" no -- ic
+# A readable, fresh file with no end=1 marker is a truncated write, not usable.
+{ echo "CVE generated=$(date +%s) db_built=$ICDB db_age_days=0 db_updated=1 images=2 elapsed=5"
+  icline quay.io/crunchtools/alpha:latest 0 0; } > "$ICSTAT"   # deliberately no "CVE end=1"
+expect "a file missing CVE end=1 is UNKNOWN (truncated)" 3 "is truncated" no -- ic
 
 echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"
