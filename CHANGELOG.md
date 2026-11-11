@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.11.0] - 2026-11-11
+
+### Added
+
+- `check_image_cve.sh` — fleet image CVE check (RT #1551). Reads `cve.status`
+  written by the `quay.io/crunchtools/grype` oneshot and routes: CRITICAL on a
+  fixable Critical CVE, WARNING on a fixable High, UNKNOWN (notifying) when the
+  scan is stale, the scanner's vulnerability DB is older than 48h, or a listed
+  image is absent from the scan; OK when only unfixable findings remain. One
+  service (`Fleet image CVEs`) that names the offending images; a coverage gap
+  never masks a real CRITICAL. Image age staleness stays with
+  `check_quay_staleness.sh`. Adds the `check_image_cve` nrpe-ctr command and the
+  `image-cve.cfg` service definition.
+
 ## [9.10.0] - 2026-11-11
 
 ### Changed
