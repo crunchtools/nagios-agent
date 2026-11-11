@@ -11,18 +11,22 @@
 #             scanner's own vulnerability DB is older than DB_STALE (a stale DB
 #             is the hermes failure in the scanner — db_built, not scan time,
 #             decides this); or a listed image is absent from the file or failed
-#             to scan AND nothing is CRITICAL (a coverage gap outranks a mere
-#             warning, but never masks a real page).
+#             to scan AND nothing is CRITICAL (a coverage gap notifies, but
+#             never masks a real page).
 #   CRITICAL  an image has a fixable Critical CVE that is NOT in the accepted
 #             baseline — a NEW fixable Critical. Page: pull in Josui, the move
 #             may be take the service offline and hand-remediate. The fix is a
 #             version BUMP (base/dep), not a same-commit rebuild — a rebuild does
 #             not clear a pinned-version critical.
-#   WARNING   an image has a fixable High CVE — bump within 6h.
-#   OK        only unfixable findings, clean, or fixable Criticals that are ALL
-#             in the baseline (known, accepted, already worked — surfaced in
-#             perfdata as baselined_crit, never paged; a regression breaks out of
-#             the baseline and pages).
+#   OK        the resting state: no NEW fixable Critical. This includes fixable
+#             Criticals that are ALL in the baseline (known, accepted, surfaced
+#             as baselined_crit), and ANY number of fixable HIGHs — the High
+#             backlog is named in the OK line and perfdata (fix_high) but does
+#             NOT drive the verdict. A permanent, non-paging WARNING on the
+#             standing High backlog would train the fleet to ignore the service
+#             and would suppress the CRITICAL/UNKNOWN recovery (which can only
+#             land on OK); Highs are owned by the enqueue bump-ticket lane. There
+#             is no WARNING tier.
 #
 # THE BASELINE. Paging on the standing backlog of known Criticals would teach the
 # fleet to ignore the one signal that matters, so the check pages on CHANGE, not
@@ -107,8 +111,8 @@ if [ -r "$CVE_BASELINE" ]; then
     done < <(grep -vE '^[[:space:]]*(#|$)' "$CVE_BASELINE")
 fi
 
-crit_imgs=(); warn_imgs=(); gap_imgs=(); base_hits=()
-tot_fix_crit=0; tot_fix_high=0; tot_new_crit=0; tot_base_crit=0; ok_n=0
+crit_imgs=(); gap_imgs=(); base_hits=()
+tot_fix_crit=0; tot_fix_high=0; tot_new_crit=0; tot_base_crit=0; ok_n=0; high_img_n=0
 
 # Parse the scan ONCE. Item lines give per-image counts and result; finding lines
 # give the per-CVE detail the baseline matches on. Both keyed by image ref; the
@@ -177,12 +181,14 @@ for img in "${expected[@]}"; do
         fi
         crit_imgs+=("$label")
     else
-        # Not paging on this image. A baselined Critical and a fixable High are
-        # independent: an image can carry both, so surface each — the High must
-        # still WARN even when the image also has an accepted Critical. Only an
-        # image with neither is clean.
+        # Not paging on this image. A baselined Critical is surfaced (accepted,
+        # counted). A fixable High is counted for the OK text and the enqueue
+        # backlog but does NOT drive the verdict: a non-paging permanent WARNING
+        # on the standing High backlog trains the fleet to ignore the service,
+        # and it suppresses the CRITICAL/UNKNOWN RECOVERY, which can only fire on
+        # a return to OK. The High backlog is owned by the enqueue bump tickets.
         [ "$seen_findings" -ge 1 ] && base_hits+=("$(basename "$ref")($seen_findings)")
-        [ "$fh" -ge 1 ] && warn_imgs+=("$(basename "$ref")($fh)")
+        [ "$fh" -ge 1 ] && high_img_n=$(( high_img_n + 1 ))
         [ "$seen_findings" -eq 0 ] && [ "$fh" -eq 0 ] && ok_n=$(( ok_n + 1 ))
     fi
 done
@@ -193,21 +199,23 @@ stale_base=0
 for k in "${!base[@]}"; do [ "${base[$k]}" != hit ] && stale_base=$(( stale_base + 1 )); done
 
 join() { local IFS=,; echo "$*"; }
-perf="| new_crit=$tot_new_crit baselined_crit=$tot_base_crit fix_crit=$tot_fix_crit fix_high=$tot_fix_high images=${#expected[@]} crit_images=${#crit_imgs[@]} warn_images=${#warn_imgs[@]} gaps=${#gap_imgs[@]} baseline=$base_total stale_baseline=$stale_base db_age=${db_age}s scan_age=${file_age}s"
+perf="| new_crit=$tot_new_crit baselined_crit=$tot_base_crit fix_crit=$tot_fix_crit fix_high=$tot_fix_high images=${#expected[@]} crit_images=${#crit_imgs[@]} high_images=$high_img_n gaps=${#gap_imgs[@]} baseline=$base_total stale_baseline=$stale_base db_age=${db_age}s scan_age=${file_age}s"
 gaps_note=""; [ "${#gap_imgs[@]}" -gt 0 ] && gaps_note=" [not in scan: $(join "${gap_imgs[@]}")]"
 base_note=""; [ "${#base_hits[@]}" -gt 0 ] && base_note=" [baselined: $(join "${base_hits[@]}")]"
 
-# ── verdict: a real page outranks a coverage gap, which outranks a warning ────
+# ── verdict: a NEW fixable Critical pages and outranks a coverage gap. The
+#    fixable-High backlog never pages (worked via enqueue), so it does NOT WARN —
+#    it is named in the OK line and perfdata. OK is the resting state, so the
+#    CRITICAL/UNKNOWN recovery can land on it. ─────────────────────────────────
 if [ "${#crit_imgs[@]}" -gt 0 ]; then
     echo "CRITICAL - NEW fixable Critical CVE in ${#crit_imgs[@]} image(s): $(join "${crit_imgs[@]}")${base_note}${gaps_note} $perf"
     exit 2
 elif [ "${#gap_imgs[@]}" -gt 0 ]; then
     echo "UNKNOWN - ${#gap_imgs[@]} listed image(s) absent from the scan or failed: $(join "${gap_imgs[@]}")${base_note} $perf"
     exit 3
-elif [ "${#warn_imgs[@]}" -gt 0 ]; then
-    echo "WARNING - fixable High CVE in ${#warn_imgs[@]} image(s): $(join "${warn_imgs[@]}")${base_note} $perf"
-    exit 1
 else
-    echo "OK - no NEW fixable Critical/High CVEs across ${#expected[@]} fleet image(s)${base_note} $perf"
+    ok_msg="OK - no NEW fixable Critical across ${#expected[@]} fleet image(s)"
+    [ "$high_img_n" -gt 0 ] && ok_msg="$ok_msg; $tot_fix_high fixable High across $high_img_n image(s), worked via enqueue"
+    echo "${ok_msg}${base_note} $perf"
     exit 0
 fi

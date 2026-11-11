@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.0.0] - 2026-11-11
+
+### Changed
+
+- **BREAKING (verdict threshold).** `check_image_cve.sh` drops the WARNING tier:
+  fixable Highs no longer drive the verdict (RT #1551). The fleet carries a large
+  standing High backlog (hundreds across the fleet), and with `notification_options
+  c,u,r` a WARNING never paged — so a WARNING tier only pinned the service to a
+  permanent yellow, which trains the fleet to ignore it AND suppresses the
+  CRITICAL/UNKNOWN recovery (which can only fire on a return to OK). Highs are now
+  counted and named in the OK line (`N fixable High across K image(s), worked via
+  enqueue`) and in perfdata (`fix_high`), but the service rests at OK. Only a NEW
+  fixable Critical (CRITICAL) and a silently-dead scanner (UNKNOWN) page; the High
+  backlog is owned by the enqueue bump-ticket lane. Perfdata `warn_images` →
+  `high_images`. Per the constitution, a verdict-threshold change is MAJOR.
+- The `Fleet image CVEs` service is now live: `notifications_enabled 1`
+  (`notification_options c,u,r`), baseline seeded from the live scan.
+
 ## [10.0.0] - 2026-11-11
 
 ### Changed
