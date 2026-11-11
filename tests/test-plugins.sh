@@ -1461,7 +1461,16 @@ expect "no fixable crit/high is OK" 0 "^OK - no NEW fixable Critical across 2 fl
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 2 0)" "$(icline quay.io/crunchtools/beta:latest 0 1)"
 expect "a fixable Critical is CRITICAL and outranks a warning" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 2)"
-expect "a fixable High alone is OK (does not page), named + counted" 0 "^OK - no NEW fixable Critical.*2 fixable High across 1 image\(s\), worked via enqueue" no -- ic
+# 11.0.0 dropped the WARNING tier: a fixable High is OK (worked via enqueue). Assert
+# the perfdata contract (fix_high, high_images), not only the summary, so a
+# regression that drops a field or re-adds warn_images is caught.
+expect "a fixable High alone is OK (does not page), named + counted" 0 "^OK - no NEW fixable Critical.*2 fixable High across 1 image\(s\), worked via enqueue \|.*fix_high=2 .*high_images=1" no -- ic
+HIGH1=$(ic)
+ok_if "the fixable-High OK path emits no warn_images (the WARNING tier is gone)" bash -c '! grep -q warn_images <<<"$1"' _ "$HIGH1"
+# Highs spread across two images: the count aggregates (fix_high=5) and the image
+# tally rises (high_images=2), still OK.
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 2)" "$(icline quay.io/crunchtools/beta:latest 0 3)"
+expect "fixable Highs across two images aggregate in perfdata, still OK" 0 "^OK - no NEW fixable Critical.*5 fixable High across 2 image\(s\), worked via enqueue \|.*fix_high=5 .*high_images=2" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)"
 expect "a listed image absent from the scan is UNKNOWN" 3 "^UNKNOWN - 1 listed image.* absent from the scan" no -- ic
 icstat "$ICDB_OLD" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
@@ -1500,6 +1509,14 @@ rm -f /tmp/pwn_cve_test
   icline quay.io/crunchtools/alpha:latest 0 0; icline quay.io/crunchtools/beta:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
 expect "a hostile item key is ignored, not executed (OK)" 0 "^OK" no -- ic
 ok_if "the hostile item key did not execute a command" test ! -e /tmp/pwn_cve_test
+
+# The Fleet CVE service exists to PAGE (RT #1551): notifications ENABLED with the
+# c,u,r options is what carries a NEW fixable Critical (CRITICAL) and a coverage
+# gap (UNKNOWN) to Scott, with recovery on the return to OK. Guard the shipped
+# service config so an edit cannot silently return it to configured-but-silent.
+ICCFG="$HERE/../deploy/nagios/image-cve.cfg"
+ok_if "Fleet CVE service has notifications enabled" grep -Eq '^[[:space:]]*notifications_enabled[[:space:]]+1[[:space:]]*$' "$ICCFG"
+ok_if "Fleet CVE service notifies on CRITICAL, UNKNOWN and recovery (c,u,r)" grep -Eq '^[[:space:]]*notification_options[[:space:]]+c,u,r[[:space:]]*$' "$ICCFG"
 
 # ── CVE-ID baseline (page on CHANGE, not on the standing backlog) ──────────────
 # A fixable Critical whose (image, CVE) is in the baseline is known and accepted:
