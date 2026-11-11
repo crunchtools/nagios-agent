@@ -1481,6 +1481,18 @@ expect "a file missing CVE end=1 is UNKNOWN (truncated)" 3 "is truncated" no -- 
 { echo 'CVE generated=x[$(id)] db_built='"$ICDB"' db_age_days=0 images=2'
   icline quay.io/crunchtools/alpha:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
 expect "a malformed generated field is UNKNOWN, not evaluated" 3 "malformed generated field" no -- ic
+# A leading-zero count must be read base 10, not octal (08 would error under $(( ))).
+{ echo "CVE generated=$(date +%s) db_built=$ICDB db_age_days=0 images=2"
+  echo "CVE item=quay.io/crunchtools/alpha:latest seen=$(date +%s) result=ok fix_crit=08 fix_high=0"
+  icline quay.io/crunchtools/beta:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
+expect "a leading-zero fix count is base-10, not octal (CRITICAL)" 2 "^CRITICAL" no -- ic
+# A hostile item value (a would-be array-subscript injection) is skipped, not run.
+rm -f /tmp/pwn_cve_test
+{ echo "CVE generated=$(date +%s) db_built=$ICDB db_age_days=0 images=2"
+  echo 'CVE item=x[$(touch /tmp/pwn_cve_test)] seen=1 result=ok fix_crit=1 fix_high=0'
+  icline quay.io/crunchtools/alpha:latest 0 0; icline quay.io/crunchtools/beta:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
+expect "a hostile item key is ignored, not executed (OK)" 0 "^OK" no -- ic
+ok_if "the hostile item key did not execute a command" test ! -e /tmp/pwn_cve_test
 
 echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"

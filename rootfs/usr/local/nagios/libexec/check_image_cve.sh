@@ -53,6 +53,9 @@ db_built=$(cl_field db_built "$header")
 # is UNKNOWN, never a shell. fix_crit/fix_high are validated the same way below.
 [[ $generated =~ ^[0-9]+$ ]] || { echo "UNKNOWN - $STATUS: malformed generated field"; exit 3; }
 [[ $db_built  =~ ^[0-9]+$ ]] || { echo "UNKNOWN - $STATUS: malformed db_built field"; exit 3; }
+# Force base 10: a digit string with a leading zero (08, 09) is octal in bash
+# arithmetic and errors ("value too great for base 8") instead of computing.
+generated=$(( 10#$generated )); db_built=$(( 10#$db_built ))
 
 file_age=$(( now - generated ))
 if [ "$generated" -eq 0 ] || [ "$file_age" -ge "$FILE_STALE" ]; then
@@ -80,7 +83,10 @@ tot_fix_crit=0; tot_fix_high=0; ok_n=0
 declare -A sresult sfcrit sfhigh
 while IFS= read -r line; do
     iref=$(cl_field item "$line")
-    [ -n "$iref" ] || continue
+    # The item value becomes a map KEY; validate it against the image-ref grammar
+    # first. An unvalidated array subscript is a command-injection surface on some
+    # bash versions — the array-key analogue of the arithmetic validation above.
+    [[ $iref =~ ^[A-Za-z0-9._:/-]+$ ]] || continue
     sresult[$iref]=$(cl_field result "$line")
     sfcrit[$iref]=$(cl_field fix_crit "$line")
     sfhigh[$iref]=$(cl_field fix_high "$line")
@@ -92,8 +98,10 @@ for img in "${expected[@]}"; do
         gap_imgs+=("$ref"); continue
     fi
     fc=${sfcrit[$ref]}; fh=${sfhigh[$ref]}
-    [[ $fc =~ ^[0-9]+$ ]] || fc=0    # validate before arithmetic (see note above)
-    [[ $fh =~ ^[0-9]+$ ]] || fh=0
+    # Validate before arithmetic (see note above), and force base 10 so a value
+    # like 08 is eight, not an octal error.
+    [[ $fc =~ ^[0-9]+$ ]] && fc=$(( 10#$fc )) || fc=0
+    [[ $fh =~ ^[0-9]+$ ]] && fh=$(( 10#$fh )) || fh=0
     tot_fix_crit=$(( tot_fix_crit + fc )); tot_fix_high=$(( tot_fix_high + fh ))
     if   [ "$fc" -ge 1 ]; then crit_imgs+=("$(basename "$ref")($fc)")
     elif [ "$fh" -ge 1 ]; then warn_imgs+=("$(basename "$ref")($fh)")
