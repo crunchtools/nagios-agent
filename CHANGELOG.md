@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [9.12.0] - 2026-11-11
+
+### Changed
+
+- `check_image_cve.sh` now pages on CHANGE, not on the standing backlog
+  (RT #1551). A fixable Critical pages (CRITICAL) only when its `(image, CVE)`
+  is NOT in the accepted baseline (`cve-baseline.conf`); a Critical already in
+  the baseline is known, counted as `baselined_crit`, and does not page. A
+  regression — a new CVE, a known CVE surfacing in a new image, or (fail-safe) a
+  counted Critical with no finding line to attribute to a baseline entry —
+  still pages. This replaces the previous count-only routing, which would have
+  paged on the whole known backlog and trained the fleet to ignore the page.
+  The fix for a CRITICAL is a version BUMP (base/dependency), not a same-commit
+  rebuild — stated in the check and the service notes.
+
+### Added
+
+- `cve-baseline.conf` — the accepted `(image, CVE)` baseline, mounted into the
+  nagios-agent container at `/etc/nagios/cve-baseline.conf` and seeded from the
+  live findings at go-live. New `CVE_BASELINE` env on the `check_image_cve`
+  nrpe-ctr command; a new perfdata set (`new_crit`, `baselined_crit`,
+  `baseline`, `stale_baseline`). An empty or missing baseline accepts nothing
+  (every fixable Critical pages) — the fail-safe before seeding.
+
 ## [9.11.0] - 2026-11-11
 
 ### Added

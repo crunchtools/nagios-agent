@@ -1439,20 +1439,27 @@ echo "=== check_image_cve (RT #1551) ==="
 IC="$LIBEXEC/check_image_cve.sh"
 ICSTAT="$RSTATE/cve.status"
 ICFLEET="$RSTUBS/cve-fleet.conf"
+ICBASE="$RSTUBS/cve-baseline.conf"
 printf 'quay.io/crunchtools/alpha\nquay.io/crunchtools/beta\n' > "$ICFLEET"
-# ic: run the check with the fleet list as its argument, STATE_DIR -> $RSTATE
-ic() { rchk "$IC" "$ICFLEET"; }
+: > "$ICBASE"   # empty baseline by default: nothing accepted, every Critical is NEW
+# ic: run the check with the fleet list as its argument, STATE_DIR -> $RSTATE,
+# CVE_BASELINE -> the (by default empty) stub baseline so the test is hermetic.
+# CVE_BASELINE must be EXPORTED: rchk forwards STATE_DIR/EXEC/COLLECT as prefixes
+# on the external script, but a non-exported shell var set here would not reach it.
+ic() { export CVE_BASELINE="$ICBASE"; rchk "$IC" "$ICFLEET"; }
 # icline <ref> <fix_crit> <fix_high>: one result=ok item line
 icline() { echo "CVE item=$1 seen=$(date +%s) source=podman result=ok total=10 crit=0 high=0 med=5 fix_crit=$2 fix_high=$3 unfix=5 rce=0"; }
+# icfind <ref> <cve> [pkg] [installed] [fix]: one fixable-Critical finding line
+icfind() { echo "CVE finding item=$1 cve=$2 pkg=${3:-libx} type=deb installed=${4:-1.0.0} fix=${5:-1.2.3} net=1 path=/p"; }
 # icstat <db_built> <item-lines...>: write cve.status with a fresh generated= time
 icstat() { local db=$1; shift; { echo "CVE generated=$(date +%s) db_built=$db db_age_days=0 db_updated=1 images=2 elapsed=5"; for l in "$@"; do echo "$l"; done; echo "CVE end=1"; } > "$ICSTAT"; }
 ICDB=$(( $(date +%s) - 3600 ))       # DB built 1h ago — fresh
 ICDB_OLD=$(( $(date +%s) - 200000 )) # DB built ~55h ago — stale
 
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
-expect "no fixable crit/high is OK" 0 "^OK - no fixable Critical/High CVEs across 2 fleet image" no -- ic
+expect "no fixable crit/high is OK" 0 "^OK - no NEW fixable Critical/High CVEs across 2 fleet image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 2 0)" "$(icline quay.io/crunchtools/beta:latest 0 1)"
-expect "a fixable Critical is CRITICAL and outranks a warning" 2 "^CRITICAL - fixable Critical CVE in 1 image" no -- ic
+expect "a fixable Critical is CRITICAL and outranks a warning" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 2)"
 expect "only a fixable High is WARNING" 1 "^WARNING - fixable High CVE in 1 image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)"
@@ -1460,7 +1467,7 @@ expect "a listed image absent from the scan is UNKNOWN" 3 "^UNKNOWN - 1 listed i
 icstat "$ICDB_OLD" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
 expect "a vulnerability DB older than 48h is UNKNOWN" 3 "^UNKNOWN - scanner vulnerability DB is stale" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 1 0)"
-expect "a real page is not masked by a coverage gap" 2 "^CRITICAL - fixable Critical CVE in 1 image" no -- ic
+expect "a real page is not masked by a coverage gap" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image" no -- ic
 icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
 age_status "$ICSTAT" 40000
 expect "a scan older than 9h is UNKNOWN" 3 "^UNKNOWN - scan is stale" no -- ic
@@ -1493,6 +1500,60 @@ rm -f /tmp/pwn_cve_test
   icline quay.io/crunchtools/alpha:latest 0 0; icline quay.io/crunchtools/beta:latest 0 0; echo "CVE end=1"; } > "$ICSTAT"
 expect "a hostile item key is ignored, not executed (OK)" 0 "^OK" no -- ic
 ok_if "the hostile item key did not execute a command" test ! -e /tmp/pwn_cve_test
+
+# ── CVE-ID baseline (page on CHANGE, not on the standing backlog) ──────────────
+# A fixable Critical whose (image, CVE) is in the baseline is known and accepted:
+# it does not page. Anything the baseline does not cover — a new CVE, a known CVE
+# in a new image, or a counted Critical with no finding line — is a regression.
+printf 'quay.io/crunchtools/alpha:latest CVE-TEST-0001\n' > "$ICBASE"
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 1 0)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a baselined Critical is known and does NOT page (OK, counted)" 0 "^OK - no NEW fixable Critical.*baselined: alpha:latest\(1\).*new_crit=0 baselined_crit=1" no -- ic
+
+# A NEW CVE in a baselined image breaks out of the baseline and pages, naming the bump.
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 2 0)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0099 libnew 2.0 2.1)" \
+  "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a NEW CVE in a baselined image pages, names the bump" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image.*alpha:latest\(1\) CVE-TEST-0099 \[libnew 2.0->2.1\]" no -- ic
+
+# A KNOWN CVE surfacing in a NEW image is not covered by the baseline (keyed per image) and pages.
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 1 0)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icline quay.io/crunchtools/beta:latest 1 0)" \
+  "$(icfind quay.io/crunchtools/beta:latest CVE-TEST-0001)"
+expect "a baselined CVE in a NEW image still pages" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image.*beta:latest\(1\)" no -- ic
+
+# Fail-safe: the count claims 2 Criticals but only one finding line (baselined) —
+# the unattributable one cannot be assumed accepted, so it pages.
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 2 0)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a counted Critical with no finding line is NEW (fail-safe)" 2 "^CRITICAL - NEW fixable Critical CVE in 1 image.*alpha:latest\(1\)" no -- ic
+
+# A stale baseline entry (a CVE no scan shows any more) never matches: harmless,
+# surfaced as stale_baseline so the backlog can be pruned, never a page.
+printf 'quay.io/crunchtools/alpha:latest CVE-GONE-0000\n' > "$ICBASE"
+icstat "$ICDB" "$(icline quay.io/crunchtools/alpha:latest 0 0)" "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a stale baseline entry is OK and surfaced, not paged" 0 "^OK - no NEW fixable.*stale_baseline=1" no -- ic
+
+# A hostile baseline line (injection in the CVE token) is rejected by the grammar
+# before it is used as an array key; parsing continues and a real match still holds.
+rm -f /tmp/pwn_base_test
+{ echo 'quay.io/crunchtools/alpha:latest CVE[$(touch /tmp/pwn_base_test)]'
+  echo 'quay.io/crunchtools/alpha:latest CVE-TEST-0001'; } > "$ICBASE"
+icstat "$ICDB" \
+  "$(icline quay.io/crunchtools/alpha:latest 1 0)" \
+  "$(icfind quay.io/crunchtools/alpha:latest CVE-TEST-0001)" \
+  "$(icline quay.io/crunchtools/beta:latest 0 0)"
+expect "a hostile baseline line is skipped; a valid one still matches (OK)" 0 "^OK - no NEW fixable.*baselined: alpha:latest\(1\)" no -- ic
+ok_if "the hostile baseline line did not execute a command" test ! -e /tmp/pwn_base_test
+: > "$ICBASE"   # restore the empty baseline for any later use
 
 echo "=== google-oauth-collect + check_google_oauth ==="
 GC="$LIBEXEC/google-oauth-collect.sh"
