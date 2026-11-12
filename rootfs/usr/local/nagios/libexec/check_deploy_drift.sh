@@ -26,13 +26,31 @@
 #              auto-update had just installed. Fix: drop one, in /srv and /etc.
 #
 # A container marked io.crunchtools.deploy=deployer and NOT labelled for
-# auto-update is counted as deployer-managed and is never drift. It is deployed
-# by ticket -- with a maintenance window, a health probe and one rollback -- so
-# "behind what the tag points at now" is its normal state rather than a defect,
-# and check_deployer.sh is what watches it. The marker is a label on the
-# container and not a list of images in this file on purpose: the robot's
-# registry grows one service at a time, and a check that needed editing for
-# each one would be a check that was wrong in between.
+# auto-update is counted as deployer-managed and is never CONTAINER drift. It is
+# deployed by ticket -- with a maintenance window, a health probe and one
+# rollback -- so "behind what the tag points at now" is its normal state for a
+# while rather than a defect. The marker is a label on the container and not a
+# list of images in this file on purpose: the robot's registry grows one
+# service at a time, and a check that needed editing for each one would be a
+# check that was wrong in between.
+#
+#   undeployed  a deployer-registry service whose running image has been behind
+#               the registry's :latest for more than DEPLOYER_GRACE_HOURS (24).
+#               A release nobody put live: rotv sat 37 releases behind this
+#               way with every check green. Fix: file (or answer) the Deploy
+#               ticket for the release.
+#
+# The undeployed verdict is NOT read from Quay or podman here. The deployer's
+# release follower (crunchtools/deployer 0.9.0) already compares every registry
+# row with its :latest each hour and writes the answer to FOLLOW_STATUS, one
+# line per service, with since= set to the build time of :latest whenever the
+# service is behind it. That is the stateless timestamp the grace is measured
+# from (constitution XVI, Drift Grace): the service has been behind at least
+# since then. A row the follower could not judge (result=error) is unreadable,
+# under the honesty rule below. When the follower's file is missing, truncated,
+# older than FOLLOW_STALE or written by a follower older than 0.9.0, deployer
+# services are not compared and the headline says so; the alarm for that is
+# check_release_follow.sh's, so it is not raised twice.
 #
 # An image pinned by digest (@sha256:) is a deliberate choice -- kagemusha pins
 # one so what it runs changes only when its unit does -- so it is counted in
@@ -73,17 +91,25 @@
 # to the tag date the collector recorded, so grace_hours stays this plugin's
 # argument.
 #
-# Usage: check_deploy_drift.sh [grace_hours]
+# Usage: check_deploy_drift.sh [grace_hours] [deployer_grace_hours]
 
 set -uo pipefail
 
 GRACE_HOURS=${1:-30}
+DEPLOYER_GRACE_HOURS=${2:-24}
 SOCK=${PODMAN_SOCK:-/run/podman/podman.sock}
+FOLLOW_STATUS=${FOLLOW_STATUS:-/var/lib/deployer/follower/release-follow.status}
+# Three hourly passes, the same threshold check_release_follow.sh warns at.
+FOLLOW_STALE=${FOLLOW_STALE:-10800}
 
 OK=0; WARNING=1; UNKNOWN=3
 
 if ! [[ "$GRACE_HOURS" =~ ^[0-9]+$ ]]; then
     echo "DEPLOY DRIFT UNKNOWN - grace_hours must be a whole number"
+    exit $UNKNOWN
+fi
+if ! [[ "$DEPLOYER_GRACE_HOURS" =~ ^[0-9]+$ ]]; then
+    echo "DEPLOY DRIFT UNKNOWN - deployer_grace_hours must be a whole number"
     exit $UNKNOWN
 fi
 
@@ -132,29 +158,69 @@ while IFS= read -r line; do
 # on that alone, in a build whose diff was somewhere else entirely (RT#1558).
 done < <(grep '^DDRIFT item=' <<< "$CL_RAW" | sort -t '=' -k5)
 
+# ---- deployer-registry services, from the release follower's status file ----
+
+undeployed=""; judged=0; follow_note=""; follow_age=0
+dgrace=$((DEPLOYER_GRACE_HOURS * 3600))
+follow_raw=""
+[ -f "$FOLLOW_STATUS" ] && [ -r "$FOLLOW_STATUS" ] && follow_raw=$(cat "$FOLLOW_STATUS" 2>/dev/null)
+follow_head=$(grep -m1 '^FOLLOWER generated=' <<< "$follow_raw")
+follow_gen=$(cl_field generated "$follow_head")
+if [ -z "$follow_raw" ]; then
+    follow_note="no follower status"
+elif ! grep -qx 'FOLLOWER end=1' <<< "$follow_raw"; then
+    follow_note="follower status truncated"
+elif ! [[ "$follow_gen" =~ ^[0-9]+$ ]]; then
+    follow_note="follower status has no generated time"
+elif follow_age=$(( now - follow_gen )); [ "$follow_age" -ge "$FOLLOW_STALE" ]; then
+    follow_note="follower status $(( follow_age / 3600 ))h old"
+elif ! grep -q '^FOLLOWER service .* since=' <<< "$follow_raw" && grep -q '^FOLLOWER service ' <<< "$follow_raw"; then
+    # 0.8.0 wrote no since=, so a behind service there has no age to judge.
+    follow_note="follower status predates since= (deployer < 0.9.0)"
+else
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        svc=$(cl_field name "$line"); since=$(cl_field since "$line")
+        if [ "$(cl_field result "$line")" = error ]; then
+            unknown="$unknown ${svc}(follower)"
+            continue
+        fi
+        judged=$((judged + 1))
+        [[ "$since" =~ ^[0-9]+$ ]] || continue
+        if [ $(( now - since )) -ge "$dgrace" ]; then
+            undeployed="$undeployed ${svc}($(( (now - since) / 3600 ))h)"
+        fi
+    done < <(grep '^FOLLOWER service ' <<< "$follow_raw")
+fi
+[ "$follow_age" -lt 0 ] && follow_age=0
+
 n_unmanaged=$(printf '%s' "$unmanaged" | wc -w)
 n_stale=$(printf '%s' "$stale" | wc -w)
 n_contested=$(printf '%s' "$contested" | wc -w)
+n_undeployed=$(printf '%s' "$undeployed" | wc -w)
 n_unknown=$(printf '%s' "$unknown" | wc -w)
-drift=$((n_unmanaged + n_stale + n_contested))
-total=$((drift + n_unknown + clean))
+drift=$((n_unmanaged + n_stale + n_contested + n_undeployed))
+# Containers and deployer services are counted in one total: both are things
+# this check compared, and the honesty thresholds below are over all of them.
+total=$((n_unmanaged + n_stale + n_contested + n_unknown + clean + judged))
 
-perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 contested=${n_contested};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0 deployer=${deployer};;;0 collected_age=${CL_AGE}s;;${STALE}"
+perf="unmanaged=${n_unmanaged};;;0 stale=${n_stale};;;0 contested=${n_contested};;;0 undeployed=${n_undeployed};;;0 clean=${clean};;;0 unknown=${n_unknown};;;0 pinned=${pinned};;;0 deployer=${deployer};;;0 collected_age=${CL_AGE}s;;${STALE} follower_age=${follow_age}s;;${FOLLOW_STALE}"
 
 detail=""
 [ -n "$unmanaged" ] && detail="${detail}unmanaged (no autoupdate label):${unmanaged}. "
 [ -n "$stale" ] && detail="${detail}stale (auto-update not applying):${stale}. "
 [ -n "$contested" ] && detail="${detail}contested (deployer marker AND autoupdate=registry):${contested}. "
+[ -n "$undeployed" ] && detail="${detail}undeployed (deployer service behind :latest over ${DEPLOYER_GRACE_HOURS}h):${undeployed}. "
 [ -n "$unknown" ] && detail="${detail}unreadable:${unknown}. "
 [ -n "$CL_KICKED" ] && detail="${detail}${CL_KICKED# }. "
 
 if [ "$n_unknown" -gt 0 ] && [ "$drift" -eq 0 ]; then
-    echo "DEPLOY DRIFT UNKNOWN - ${n_unknown}/${total} containers could not be checked. ${detail}| $perf"
+    echo "DEPLOY DRIFT UNKNOWN - ${n_unknown}/${total} could not be checked. ${detail}| $perf"
     exit $UNKNOWN
 fi
 
 if [ "$n_unknown" -gt $((total / 2)) ]; then
-    echo "DEPLOY DRIFT UNKNOWN - ${n_unknown}/${total} containers could not be checked, too many to trust the rest. ${detail}| $perf"
+    echo "DEPLOY DRIFT UNKNOWN - ${n_unknown}/${total} could not be checked, too many to trust the rest. ${detail}| $perf"
     exit $UNKNOWN
 fi
 
@@ -164,13 +230,20 @@ fi
 # one way this could quietly stop being true.
 managed=""
 [ "$deployer" -gt 0 ] && managed=", ${deployer} deployed by ticket"
+# Said either way, so a reader can tell "no deployer service is behind" from
+# "deployer services were not looked at".
+if [ -n "$follow_note" ]; then
+    managed="${managed} (deployer services not compared: ${follow_note})"
+else
+    managed="${managed} (${judged} deployer services compared with :latest)"
+fi
 
 if [ "$drift" -eq 0 ]; then
-    echo "DEPLOY DRIFT OK - ${clean}/${total} containers run the image their tag points at${managed} | $perf"
+    echo "DEPLOY DRIFT OK - ${clean}/$((total - judged)) containers run the image their tag points at${managed} | $perf"
     exit $OK
 fi
 
 blind=""
 [ "$n_unknown" -gt 0 ] && blind=", ${n_unknown} UNCHECKED"
-echo "DEPLOY DRIFT WARNING - ${drift}/${total} containers drifted: ${n_unmanaged} unmanaged, ${n_stale} stale, ${n_contested} contested${blind}. ${detail}| $perf"
+echo "DEPLOY DRIFT WARNING - ${drift}/${total} drifted: ${n_unmanaged} unmanaged, ${n_stale} stale, ${n_contested} contested, ${n_undeployed} undeployed${blind}. ${detail}| $perf"
 exit $WARNING
