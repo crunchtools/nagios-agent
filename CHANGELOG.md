@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.1.1] - 2026-11-12
+
+### Fixed
+
+- Reference Nagios definitions in `deploy/nagios/` and the
+  `backup-freshness-collect.sh` comment name the host `gloval.dc1` after the
+  dc4 -> dc1 rename, so Config drift cross-repo and Plugin drift match the
+  deployed /srv copies again.
+
 ## [11.1.0] - 2026-11-11
 
 ### Added
