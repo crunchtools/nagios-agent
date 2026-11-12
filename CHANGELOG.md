@@ -6,8 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.0.1] - 2026-11-11
+
 ### Fixed
 
+- Config drift cross-repo maps `grype.crunchtools.com` to the grype repo and
+  `cve-enqueue.crunchtools.com` to deployer, so neither reports as unmapped
+  (RT #1551).
+- `deploy/nagios-agent/cve-baseline.conf` now carries the live accepted
+  baseline seeded on gloval, rather than the empty template (RT #1551).
 - Registry drift no longer lists acquacotta-base, acquacotta-test and rotv-base:
   they publish `:main` only and never carry a version tag (RT#1550).
 
