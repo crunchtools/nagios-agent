@@ -1,20 +1,22 @@
 FROM registry.access.redhat.com/ubi10/ubi-minimal
 
-# Register with RHSM using activation key (secrets mounted at build time, never in image layers)
+# Register with RHSM, install, and unregister in ONE layer with a trap so
+# unregister+clean run even if an install fails (constitution II). Nothing is
+# committed to a layer, so no RHSM consumer leaks as a ghost host in inventory.
 RUN --mount=type=secret,id=activation_key \
-    --mount=type=secret,id=org_id \
-    if [ -f /run/secrets/activation_key ] && [ -f /run/secrets/org_id ]; then \
-        subscription-manager register \
-            --activationkey="$(cat /run/secrets/activation_key)" \
-            --org="$(cat /run/secrets/org_id)"; \
-    fi
-
-# Install EPEL repo RPM (microdnf can't install from URLs, use rpm directly)
-RUN curl -sLo /tmp/epel.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm && \
-    rpm -ivh /tmp/epel.rpm && rm -f /tmp/epel.rpm
-
-# Install NRPE daemon and check plugins
-RUN microdnf install -y \
+    --mount=type=secret,id=org_id <<'EOF'
+set -euo pipefail
+if [ -s /run/secrets/activation_key ] && [ -s /run/secrets/org_id ]; then
+    subscription-manager register \
+        --activationkey="$(cat /run/secrets/activation_key)" \
+        --org="$(cat /run/secrets/org_id)"
+    trap 'subscription-manager unregister || true; subscription-manager clean || true' EXIT
+fi
+# EPEL repo RPM (microdnf can't install from URLs, use rpm directly)
+curl -sLo /tmp/epel.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
+rpm -ivh /tmp/epel.rpm && rm -f /tmp/epel.rpm
+# NRPE daemon and check plugins
+microdnf install -y \
     nrpe \
     nagios-plugins-load \
     nagios-plugins-disk \
@@ -27,8 +29,9 @@ RUN microdnf install -y \
     procps-ng \
     iproute \
     git-core \
-    sqlite \
-    && microdnf clean all
+    sqlite
+microdnf clean all
+EOF
 
 # sqlite: check_sqlite_rows.sh counts rows in a service's index database through
 # the read-only /var/srv mount (mcp-trove, RT #1542). The CLI only; no runtime.
@@ -51,9 +54,6 @@ RUN microdnf install -y \
 # drops privileges, which rebuilds the group set from this image and discards
 # anything podman supplied. The membership has to be baked in.
 RUN groupadd -g 1500 podmansock && usermod -aG podmansock nrpe
-
-# Unregister from RHSM to avoid leaking entitlements
-RUN subscription-manager unregister 2>/dev/null || true
 
 # Overlay custom configs and check scripts
 COPY rootfs/ /
