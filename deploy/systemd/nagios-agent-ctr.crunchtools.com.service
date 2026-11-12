@@ -22,6 +22,15 @@ After=srv-secrets@nagios-agent.crunchtools.com.service
 # status files; file names do not overlap. Both containers are --privileged, so
 # :Z relabels to the same shared level and neither locks the other out, the
 # same as the scripts dir both already mount.
+#
+# DEPLOYER STATE (ro, 11.2.0). check_deploy_drift.sh reads the release
+# follower's status file, /var/lib/deployer/follower/release-follow.status, to
+# judge deployer-registry services against their :latest. The parent directory
+# is mounted, not follower/: that subdirectory exists only once release-follow
+# has run, and a bind mount of a missing path would stop this container from
+# starting. Same mount, same path and same reason for NO :Z as the host agent
+# (see nagios-agent.crunchtools.com.service): the directory is labelled
+# container_file_t statically, and relabelling would lock the deployer out.
 Description=Podman container - nagios-agent-ctr.crunchtools.com (NRPE Agent, container pool)
 Documentation=https://github.com/crunchtools/nagios-agent
 Wants=network-online.target
@@ -34,7 +43,7 @@ RestartSec=10
 ExecStartPre=/usr/bin/sleep 1.5
 ExecStartPre=-/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
 ExecStartPre=/usr/bin/mkdir -p /srv/nagios-agent.crunchtools.com/data
-ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent-ctr.crunchtools.com.service   --memory=384m --memory-swap=384m   --rm   --name nagios-agent-ctr.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-ctr.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /run/srv-secrets/nagios-agent.crunchtools.com/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf:/etc/nagios/cloudflare-zones.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/google-accounts.conf:/etc/nagios/google-accounts.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/registry-images.conf:/etc/nagios/registry-images.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/mcp-probes.conf:/etc/nagios/mcp-probes.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/data:/var/lib/nagios-agent:Z   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   -v /var/lib/grype-scan:/var/lib/grype-scan:ro   -v /srv/grype.crunchtools.com/config/fleet-images.conf:/etc/nagios/cve-fleet-images.conf:ro   -v /srv/nagios-agent.crunchtools.com/config/cve-baseline.conf:/etc/nagios/cve-baseline.conf:ro   quay.io/crunchtools/nagios-agent:latest
+ExecStart=/usr/bin/podman run   --label io.containers.autoupdate=registry   --label PODMAN_SYSTEMD_UNIT=nagios-agent-ctr.crunchtools.com.service   --memory=384m --memory-swap=384m   --rm   --name nagios-agent-ctr.crunchtools.com   --network=host   --pid=host   --privileged   -v /run/systemd/journal/dev-log:/dev/log   -v /srv/nagios-agent.crunchtools.com/config/nrpe-ctr.cfg:/etc/nagios/nrpe.cfg:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/scripts:/usr/local/nagios/libexec:ro,Z   -v /run/srv-secrets/nagios-agent.crunchtools.com/cloudflare.token:/etc/nagios/cloudflare.token:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/cloudflare-zones.conf:/etc/nagios/cloudflare-zones.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/google-accounts.conf:/etc/nagios/google-accounts.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/registry-images.conf:/etc/nagios/registry-images.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/config/mcp-probes.conf:/etc/nagios/mcp-probes.conf:ro,Z   -v /srv/nagios-agent.crunchtools.com/data:/var/lib/nagios-agent:Z   -v /srv/syslog.crunchtools.com/data/logs:/srv/syslog.crunchtools.com/data/logs:ro -v /run/podman/podman.sock:/run/podman/podman.sock   -v /var/lib/grype-scan:/var/lib/grype-scan:ro   -v /srv/grype.crunchtools.com/config/fleet-images.conf:/etc/nagios/cve-fleet-images.conf:ro   -v /srv/nagios-agent.crunchtools.com/config/cve-baseline.conf:/etc/nagios/cve-baseline.conf:ro   -v /var/lib/deployer:/var/lib/deployer:ro   quay.io/crunchtools/nagios-agent:latest
 ExecStop=/usr/bin/podman stop -t 10 nagios-agent-ctr.crunchtools.com
 ExecStopPost=/usr/bin/podman rm -f nagios-agent-ctr.crunchtools.com
 

@@ -100,6 +100,13 @@ daemon is the sole witness to its own death.
    the wrong one and production changes. Git, unit, plugin and registry drift
    stay OK for 4h after the drift starts, dated from file mtimes or the
    registry push, so a deploy in progress is not an alert.
+9. **The deploy robot and its release follower** — `check_deployer.sh` watches
+   the holds crunchtools/deployer places after a rollback and the guard that
+   honours them; `check_release_follow.sh` warns on a follower ticket stalled
+   where nobody reads it, a pass that did not end ok, or a follower that has
+   not run in 3h. `check_deploy_drift.sh` reads the same follower file to warn
+   when a deployer-registry service has run behind its `:latest` for over
+   24h, with no registry or podman read of its own.
 
 ## Quick start
 

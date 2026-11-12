@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.2.0] - 2026-11-12
+
+### Added
+
+- `check_release_follow.sh` (host agent, `check_release_follow`, service
+  definition `deploy/nagios/release-follow.cfg`): judges the deployer's release
+  follower status file, `/var/lib/deployer/follower/release-follow.status`
+  (crunchtools/deployer 0.8.0). WARNING on any stalled follower ticket, named
+  with service and commit, since nobody reads RT user `follower`'s tickets; on
+  an outcome other than `ok`; on a file without `end=1`; and on a last pass
+  3h old or more (the hourly timer stopped). UNKNOWN when the file is missing,
+  as `check_deployer.sh` treats a missing state directory.
+- `check_deploy_drift.sh` reports a fourth kind, `undeployed`: a
+  deployer-registry service whose running image has been behind the registry's
+  `:latest` for more than its new second argument, `deployer_grace_hours`
+  (default 24). It reads the follower status (deployer 0.9.0 writes `since=`,
+  the `:latest` build time, on every row that is behind), so nagios-agent gains
+  no registry or podman read for it. A row the follower could not judge counts
+  as unreadable under the honesty rule. A missing, stale (3h), truncated or
+  pre-0.9.0 follower file is not judged, and the headline says so; its alarm
+  is `check_release_follow.sh`'s.
+
+### Changed
+
+- `check_deploy_drift.sh` headlines read `N/T drifted: ... , U undeployed`
+  and `N/T could not be checked`, without the word "containers", because the
+  totals now include deployer services. Perfdata gains `undeployed` and
+  `follower_age`.
+- The container-pool agent unit mounts `/var/lib/deployer` read-only, as the
+  host agent already does, and `check_deploy_drift` takes `30 24`.
+
 ## [11.1.1] - 2026-11-12
 
 ### Fixed

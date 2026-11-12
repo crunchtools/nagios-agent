@@ -755,15 +755,18 @@ quay() { printf '{"tags":[{"name":"latest","manifest_digest":"%s","start_ts":%s}
 repodigests() { printf '{"Id":"%s","RepoDigests":["%s"]}' "$IMGID" "$1"; }
 # ddcol: one collector run; ddchk: judge its file; dd: both, from scratch
 ddcol() { STATE_DIR="$DDSTATE" "$DDC"; }
-ddchk() { STATE_DIR="$DDSTATE" EXEC="$STUBS/kick" COLLECT=/collector "$DD" "$@"; }
+# FOLLOW_STATUS points at a file that does not exist unless a test writes it,
+# so these never read a real /var/lib/deployer on the machine running them.
+DDFOLLOW="$DDSTATE/release-follow.status"
+ddchk() { STATE_DIR="$DDSTATE" EXEC="$STUBS/kick" COLLECT=/collector FOLLOW_STATUS="$DDFOLLOW" "$DD" "$@"; }
 dd() { rm -f "$DDSTAT"; ddcol; ddchk "$@"; }
 LATEST=quay.io/crunchtools/svc:latest
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") \
     expect "running digest matches Quay is OK" 0 "^DEPLOY DRIFT OK - 1/1 .*collected_age=" no -- dd
 STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
-    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged, 0 stale, 0 contested\. unmanaged \(no autoupdate label\): svc" no -- dd
+    expect "no autoupdate label is unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 1 unmanaged, 0 stale, 0 contested, 0 undeployed\. unmanaged \(no autoupdate label\): svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") \
-    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale, 0 contested" no -- dd
+    expect "digest behind Quay past grace is stale" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 0 unmanaged, 1 stale, 0 contested, 0 undeployed" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$(date +%s)") \
     expect "digest behind Quay inside grace is OK" 0 "^DEPLOY DRIFT OK - 1/1 " no -- dd
 expect "the grace is the plugin argument, applied at judging time" 1 "^DEPLOY DRIFT WARNING - .*1 stale" no -- ddchk 0
@@ -823,14 +826,14 @@ STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) \
 # And it must not be let through on the image name: the marker is what counts,
 # so an unmarked container with the same image is still unmanaged.
 STUB_SOCK=$(ctr $LATEST "" sha256:aa) \
-    expect "the same image without the marker is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged" no -- dd
+    expect "the same image without the marker is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 1 unmanaged" no -- dd
 # Both mechanisms owning one service is the onboarding mistake, and it is drift
 # rather than something to resolve silently in favour of either one.
 STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) \
-    expect "both markers is contested, not deployer-managed" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 0 stale, 1 contested\\. contested \\(deployer marker AND autoupdate=registry\\): svc" no -- dd
+    expect "both markers is contested, not deployer-managed" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 0 unmanaged, 0 stale, 1 contested, 0 undeployed\\. contested \\(deployer marker AND autoupdate=registry\\): svc" no -- dd
 # A marker this check has never heard of is not a free pass out of auto-update.
 STUB_SOCK=$(ctr $LATEST "" sha256:aa somethingelse) \
-    expect "an unrecognised marker value is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 1 unmanaged" no -- dd
+    expect "an unrecognised marker value is still unmanaged" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 1 unmanaged" no -- dd
 # RETENTION FOR THE TWO NEW KINDS. A marked container never asks Quay, so its
 # only route to UNKNOWN is the INSPECT failing -- and when inspect fails the
 # labels cannot be read, so the previous answer is the only thing that stops a
@@ -844,12 +847,12 @@ STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) dd >/dev/null
 STUB_SOCK=$(ctr $LATEST registry sha256:aa deployer) STUB_SOCK_TOKEN=aaaa STUB_SOCK_ALT_RC=22 ddcol
 expect "an unreadable inspect keeps a CONTESTED answer" 1 "^DEPLOY DRIFT WARNING - .*1 contested" no -- ddchk
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 \
-    expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc" no -- dd
+    expect "first-ever unreadable Quay is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 could not be checked\. unreadable: svc" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:bb "$OLD_TS") dd >/dev/null
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT_RC=22 ddcol
-expect "an unreadable Quay keeps the last answer" 1 "^DEPLOY DRIFT WARNING - 1/1 containers drifted: 0 unmanaged, 1 stale, 0 contested" no -- ddchk
+expect "an unreadable Quay keeps the last answer" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 0 unmanaged, 1 stale, 0 contested, 0 undeployed" no -- ddchk
 sed -i -E "/item=/s/seen=[0-9]+/seen=$(( $(date +%s) - 11000 ))/" "$DDSTAT"
-expect "an answer older than STALE counts as unreadable" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 containers could not be checked\. unreadable: svc\\(stale\\)" no -- ddchk
+expect "an answer older than STALE counts as unreadable" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 could not be checked\. unreadable: svc\\(stale\\)" no -- ddchk
 STUB_SOCK_RC=7 expect "socket unreadable is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - cannot list containers" no -- dd
 STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") dd >/dev/null
 STUB_SOCK_RC=7 ddcol 2>/dev/null
@@ -867,7 +870,89 @@ expect "missing status is UNKNOWN and starts the collector" 3 "^DEPLOY DRIFT UNK
 grep -q -- '--detach nagios-agent-ctr.crunchtools.com /collector' "$STUB_EXEC_MARK" \
     && { echo "  PASS: kick is a detached exec in the ctr agent"; PASS=$((PASS + 1)); } \
     || { echo "  FAIL: kick args: $(cat "$STUB_EXEC_MARK")"; FAIL=$((FAIL + 1)); }
+
+# ---- deployer-registry services, judged from the release follower's file ----
+# The container side is one deployer-marked container, fresh, so everything
+# below is about the follower lines alone.
+STUB_SOCK=$(ctr $LATEST "" sha256:aa deployer) dd >/dev/null
+NOW=$(date +%s)
+follow() { # <generated-age-seconds> <service-line>... ; writes DDFOLLOW whole
+    { echo "FOLLOWER generated=$(( NOW - $1 )) outcome=ok detail=x"; shift
+      for l in "$@"; do echo "FOLLOWER service $l"; done
+      echo "FOLLOWER end=1"; } > "$DDFOLLOW"
+}
+svc() { # <name> <result> <since-age-hours|-> [followed]
+    local since=-; [ "$3" != - ] && since=$(( NOW - $3 * 3600 ))
+    echo "name=$1 result=$2 ticket=- followed=${4:-no} since=$since detail=x"
+}
+rm -f "$DDFOLLOW"
+expect "no follower status: deployer services not compared, still OK" 0 "^DEPLOY DRIFT OK - 0/0 containers .*1 deployed by ticket \(deployer services not compared: no follower status\).*undeployed=0" no -- ddchk
+follow 60 "$(svc rotv behind 37)"
+expect "a deployer service behind :latest over 24h is undeployed" 1 "^DEPLOY DRIFT WARNING - 1/1 drifted: 0 unmanaged, 0 stale, 0 contested, 1 undeployed\. undeployed \(deployer service behind :latest over 24h\): rotv\(37h\)\. .*undeployed=1" no -- ddchk
+follow 60 "$(svc rotv behind 3)"
+expect "behind inside the 24h grace is not drift" 0 "^DEPLOY DRIFT OK - 0/0 containers .*\(1 deployer services compared with :latest\)" no -- ddchk
+expect "the deployer grace is the second argument" 1 "^DEPLOY DRIFT WARNING - .*1 undeployed.*rotv\(3h\)" no -- ddchk 30 2
+# Every result that means "behind" carries since=, followed or not: a ticket
+# being filed, pending or answered does not make the release live.
+follow 60 "$(svc a filed 30 yes)" "$(svc b pending 30 yes)" "$(svc c answered 30 yes)" "$(svc d current -)" "$(svc e ahead -)"
+expect "filed, pending and answered past grace are all undeployed; current and ahead are not" 1 "^DEPLOY DRIFT WARNING - 3/5 drifted: .*3 undeployed\. undeployed .*: a\(30h\) b\(30h\) c\(30h\)\. " no -- ddchk
+# Honesty rule: a row the follower could not judge is unreadable, never clean.
+follow 60 "$(svc rotv error -)"
+expect "a row the follower could not judge is UNKNOWN, never OK" 3 "^DEPLOY DRIFT UNKNOWN - 1/1 could not be checked\. unreadable: rotv\(follower\)" no -- ddchk
+follow 60 "$(svc rotv error -)" "$(svc proxy behind 30)"
+expect "an unjudged row beside real drift reports the drift with the blind count" 1 "^DEPLOY DRIFT WARNING - 1/2 drifted: .*1 undeployed, 1 UNCHECKED\. " no -- ddchk
+# A follower file that cannot be trusted is not judged at all. Its own alarm is
+# check_release_follow.sh's; this check only says it did not look.
+follow 11000 "$(svc rotv behind 37)"
+expect "a stale follower file is not judged" 0 "^DEPLOY DRIFT OK - .*not compared: follower status 3h old\).*undeployed=0.*follower_age=1[01][0-9]{3}s;;10800" no -- ddchk
+follow 60 "$(svc rotv behind 37)"; sed -i '/end=1/d' "$DDFOLLOW"
+expect "a truncated follower file is not judged" 0 "^DEPLOY DRIFT OK - .*not compared: follower status truncated\)" no -- ddchk
+printf 'FOLLOWER generated=%s outcome=ok detail=x\nFOLLOWER service name=rotv result=filed ticket=9 detail=x\nFOLLOWER end=1\n' "$NOW" > "$DDFOLLOW"
+expect "a 0.8.0 follower file with no since= is not judged" 0 "^DEPLOY DRIFT OK - .*not compared: follower status predates since=" no -- ddchk
+follow 60 "$(svc rotv behind 37)"
+expect "non-numeric deployer grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - deployer_grace_hours" no -- ddchk 30 soon
 rm -rf "$DDSTATE"
+
+echo "=== check_release_follow ==="
+RF="$LIBEXEC/check_release_follow.sh"
+RFD="$(mktemp -d)"
+RFS="$RFD/release-follow.status"
+rf() { # <age-seconds> <outcome> [extra-line]... ; writes RFS whole
+    local age=$1 outcome=$2; shift 2
+    { echo "FOLLOWER generated=$(( $(date +%s) - age )) outcome=$outcome detail=4_followed_of_11,_0_filed"
+      for l in "$@"; do echo "FOLLOWER $l"; done
+      echo "FOLLOWER end=1"; } > "$RFS"
+}
+expect "missing status file is UNKNOWN, as check_deployer treats a missing state dir" 3 "^RELEASE FOLLOW UNKNOWN - .* is missing or unreadable" any -- "$RF" "$RFS"
+rf 600 ok "service name=rotv result=current ticket=- followed=no since=- detail=x"
+expect "a recent whole ok pass is OK and shows the summary" 0 "^RELEASE FOLLOW OK - last pass 10m ago: 4 followed of 11, 0 filed \| stalled=0;;;0 age=6[0-9]{2}s;;10800$" any -- "$RF" "$RFS"
+rf 600 ok "stalled ticket=1800 service=mcp-nagios commit=635cdda3c863" "stalled ticket=1801 service=? commit=?"
+expect "a stalled follower ticket warns and names each one" 1 "^RELEASE FOLLOW WARNING - 2 stalled follower ticket\(s\) nobody reads \[1800:mcp-nagios@635cdda3c863,1801:\?@\?\].*stalled=2" any -- "$RF" "$RFS"
+rf 600 degraded
+expect "an outcome other than ok warns with its detail" 1 "^RELEASE FOLLOW WARNING - last pass ended degraded \(4 followed of 11, 0 filed\)" any -- "$RF" "$RFS"
+rf 600 something-new
+expect "an outcome this check has never heard of warns" 1 "^RELEASE FOLLOW WARNING - last pass ended something-new" any -- "$RF" "$RFS"
+rf 600 could-not-run
+expect "could-not-run warns" 1 "^RELEASE FOLLOW WARNING - last pass ended could-not-run" any -- "$RF" "$RFS"
+rf $(( 3 * 3600 )) ok
+expect "a pass exactly stale_hours old warns: the timer stopped" 1 "^RELEASE FOLLOW WARNING - last pass 3h ago, release-follow.crunchtools.com.timer has stopped" any -- "$RF" "$RFS"
+rf $(( 3 * 3600 - 120 )) ok
+expect "a pass just inside stale_hours is OK" 0 "^RELEASE FOLLOW OK - " any -- "$RF" "$RFS"
+expect "stale_hours is the second argument" 1 "^RELEASE FOLLOW WARNING - last pass 2h ago" any -- "$RF" "$RFS" 2
+rf $(( 5 * 3600 )) degraded "stalled ticket=1800 service=rotv commit=ea89be5c3922"
+expect "every reason is named in one line" 1 "^RELEASE FOLLOW WARNING - last pass 5h ago.*; 1 stalled follower ticket.*; last pass ended degraded" any -- "$RF" "$RFS"
+rf 600 ok; sed -i '/end=1/d' "$RFS"
+expect "a file without end=1 warns" 1 "^RELEASE FOLLOW WARNING - .* has no end=1" any -- "$RF" "$RFS"
+printf 'FOLLOWER outcome=ok\nFOLLOWER end=1\n' > "$RFS"
+expect "a file with no generated time warns" 1 "^RELEASE FOLLOW WARNING - .* has no generated= time" any -- "$RF" "$RFS"
+rf 600 ok; chmod 000 "$RFS"
+if [ "$(id -u)" -ne 0 ]; then
+    expect "an unreadable status file is UNKNOWN" 3 "^RELEASE FOLLOW UNKNOWN - .* is missing or unreadable" any -- "$RF" "$RFS"
+fi
+chmod 644 "$RFS"
+expect "non-numeric stale_hours is UNKNOWN" 3 "^RELEASE FOLLOW UNKNOWN - stale_hours" any -- "$RF" "$RFS" soon
+expect "zero stale_hours is UNKNOWN" 3 "^RELEASE FOLLOW UNKNOWN - stale_hours" any -- "$RF" "$RFS" 0
+rm -rf "$RFD"
 
 echo "=== config-drift-repos-collect + check_config_drift ==="
 # Real git throughout: a /srv-shaped repo for the fingerprint (run through an
