@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Registry drift no longer lists acquacotta-base, acquacotta-test and rotv-base:
+  they publish `:main` only and never carry a version tag (RT#1550).
+
 ## [11.0.0] - 2026-11-11
 
 ### Changed
