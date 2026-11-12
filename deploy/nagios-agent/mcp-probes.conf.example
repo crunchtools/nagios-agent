@@ -22,6 +22,11 @@
 #   token   empty, or <container>:<ENV_VAR> to read a bearer token out of that
 #           container's own environment through the podman socket. Only
 #           mcp-memory and mcp-grafana need one; nothing is copied into /srv.
+#           Or the literal 'brokered' for a backend in OAuth resource-server
+#           mode behind the Trentina gateway, which holds the grant: the probe
+#           has no bearer, so it checks liveness only (a 401 with a Bearer
+#           challenge on initialize is OK, anything else is CRITICAL) and makes
+#           no tool call. The gateway's own tools/list is what proves the grant.
 #   scope   'local' (the dependency is on gloval -- red is ours, and fixable)
 #           or 'upstream:<who>' (red may be somebody else's outage). Printed in
 #           the alert so Kagetora can triage without reading this file. It is a
@@ -76,8 +81,8 @@ mcp-gitlab|8033|get_current_user_tool||upstream:gitlab.com|{}|username.*fatherli
 # {"siteEntry":[{"siteUrl":...,"permissionLevel":...}]}. Note an account with
 # NO verified properties gets {} back, which would read as broken; Scott's has
 # several, so that is theoretical. Still worth a look after the re-auth.
-mcp-gsc|8017|list_sites_tool||upstream:searchconsole.googleapis.com|{}|siteEntry|siteUrl
-mcp-gw-personal|8011|list_gmail_labels||upstream:gmail.googleapis.com|{"user_google_email":"YOUR_GOOGLE_ACCOUNT@example.com"}|INBOX
+mcp-gsc|8017|list_sites_tool|brokered|upstream:searchconsole.googleapis.com|{}|siteEntry|siteUrl
+mcp-gw-personal|8011|list_gmail_labels|brokered|upstream:gmail.googleapis.com|{"user_google_email":"YOUR_GOOGLE_ACCOUNT@example.com"}|INBOX
 mcp-lightspeed|8024|planning__get_rhel_lifecycle||upstream:console.redhat.com|{}|RHEL.*support_status
 mcp-notebooklm|8025|server_info||upstream:notebooklm.google.com|{}|auth_status.*configured
 mcp-pcloud|8028|pcloud_auth_status||upstream:api.pcloud.com|{}|authorized and verified

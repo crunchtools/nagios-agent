@@ -2001,6 +2001,7 @@ withargs|9005|list_things_tool||local|{"repo":"x"}|thing_count
 noexpect|9006|list_things_tool||local|{}|
 badscope|9007|list_things_tool||sideways|{}|thing_count
 badport|notaport|list_things_tool||local|{}|thing_count
+brokered|9008|list_things_tool|brokered|local|{}|thing_count
 CONF
 
 hdr_ok='HTTP/1.1 200 OK
@@ -2052,6 +2053,24 @@ STUB_DIRECT="$MCP_OK" STUB_DIRECT_RC=7 expect "a transport failure is CRITICAL w
     "^CRITICAL - good \[local\]: MCP initialize failed on 127.0.0.1:9001 \(curl exit 7\)" any -- "$MT" good "$MTD/probes.conf"
 STUB_DIRECT="$MCP_OK" expect "an empty reply is CRITICAL" 2 \
     "^CRITICAL - good \[local\]: list_things_tool returned an empty response" any -- env STUB_DIRECT= "$MT" good "$MTD/probes.conf"
+
+# brokered: the gateway holds the grant, so a 401 Bearer challenge is the
+# healthy answer and anything else (including a 200) means auth is off.
+MCP_401_BEARER='HTTP/1.1 401 Unauthorized
+www-authenticate: Bearer error="invalid_token", resource_metadata="http://x/.well-known/oauth-protected-resource/mcp"
+content-type: application/json
+
+{"error":"invalid_token"}'
+MCP_401_BARE='HTTP/1.1 401 Unauthorized
+content-type: application/json
+
+{"error":"invalid_token"}'
+STUB_DIRECT="$MCP_401_BEARER" expect "brokered: a 401 Bearer challenge is OK" 0 \
+    "^OK - brokered \[local\]: brokered backend up on port 9008" any -- "$MT" brokered "$MTD/probes.conf"
+STUB_DIRECT="$MCP_401_BARE" expect "brokered: a 401 with no Bearer challenge is CRITICAL" 2 \
+    "^CRITICAL - brokered \[local\]: brokered backend expected a 401 Bearer challenge, got HTTP 401" any -- "$MT" brokered "$MTD/probes.conf"
+STUB_DIRECT="$MCP_OK" expect "brokered: a 200 (auth off) is CRITICAL" 2 \
+    "^CRITICAL - brokered \[local\]: brokered backend expected a 401 Bearer challenge, got HTTP 200" any -- "$MT" brokered "$MTD/probes.conf"
 
 # The scope tag is what Kagetora triages on, so it must reach the output.
 STUB_DIRECT="$MCP_GEMINI" expect "the upstream scope tag is carried into the alert" 2 \

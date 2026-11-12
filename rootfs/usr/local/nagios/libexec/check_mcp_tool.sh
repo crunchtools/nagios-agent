@@ -153,7 +153,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -n "$TOKEN_SRC" ]]; then
+if [[ -n "$TOKEN_SRC" && "$TOKEN_SRC" != "brokered" ]]; then
     TCTR="${TOKEN_SRC%%:*}"
     TVAR="${TOKEN_SRC##*:}"
     [[ -n "$TCTR" && -n "$TVAR" && "$TCTR" != "$TOKEN_SRC" ]] \
@@ -190,6 +190,13 @@ if (( RC != 0 )); then
 fi
 
 HTTP_CODE="$(grep -a -o -m1 '^HTTP/[0-9.]* [0-9][0-9][0-9]' <<<"$INIT_RAW" | awk '{print $2}')"
+if [[ "$TOKEN_SRC" == "brokered" ]]; then
+    if [[ "$HTTP_CODE" == "401" ]] && grep -qai '^www-authenticate:[[:space:]]*bearer' <<<"$INIT_RAW"; then
+        echo "OK - ${KEY} [${SCOPE}]: brokered backend up on port ${PORT} (401 challenge; the gateway holds the grant)"
+        exit $OK
+    fi
+    crit "${TAG}: brokered backend expected a 401 Bearer challenge, got HTTP ${HTTP_CODE:-none} on port ${PORT}"
+fi
 if [[ -n "$HTTP_CODE" && ! "$HTTP_CODE" =~ ^2 ]]; then
     crit "${TAG}: MCP initialize returned HTTP ${HTTP_CODE} on port ${PORT}"
 fi
