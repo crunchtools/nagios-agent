@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.1.0] - 2026-11-11
+
+### Added
+
+- `check_mcp_tool.sh` accepts `brokered` in the token field, for a backend in
+  OAuth resource-server mode behind the Trentina gateway. The probe has no
+  bearer, so it passes on a 401 with a `Bearer` challenge and is CRITICAL on
+  anything else, and makes no tool call. mcp-gsc and mcp-gw-personal use it.
+  This upstreams the change deployed on gloval for RT#1606, clearing Plugin
+  drift.
+
 ## [11.0.1] - 2026-11-11
 
 ### Fixed
