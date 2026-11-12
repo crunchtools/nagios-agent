@@ -911,6 +911,17 @@ printf 'FOLLOWER generated=%s outcome=ok detail=x\nFOLLOWER service name=rotv re
 expect "a 0.8.0 follower file with no since= is not judged" 0 "^DEPLOY DRIFT OK - .*not compared: follower status predates since=" no -- ddchk
 follow 60 "$(svc rotv behind 37)"
 expect "non-numeric deployer grace is UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - deployer_grace_hours" no -- ddchk 30 soon
+# Containers and deployer services share one denominator, and the honesty
+# thresholds are over both: one current container beside follower rows.
+STUB_SOCK=$(ctr $LATEST registry sha256:aa) STUB_DIRECT=$(quay sha256:aa "$OLD_TS") dd >/dev/null
+follow 60 "$(svc rotv behind 30)" "$(svc proxy current -)"
+expect "a current container and follower rows count in one total" 1 "^DEPLOY DRIFT WARNING - 1/3 drifted: 0 unmanaged, 0 stale, 0 contested, 1 undeployed\. .*clean=1" no -- ddchk
+follow 60 "$(svc a error -)" "$(svc b error -)" "$(svc rotv behind 30)"
+expect "unreadable rows at half the combined total still report the drift" 1 "^DEPLOY DRIFT WARNING - 1/4 drifted: .*1 undeployed, 2 UNCHECKED\. " no -- ddchk
+follow 60 "$(svc a error -)" "$(svc b error -)" "$(svc c error -)" "$(svc rotv behind 30)"
+expect "unreadable rows over half the combined total are UNKNOWN" 3 "^DEPLOY DRIFT UNKNOWN - 3/5 could not be checked, too many to trust the rest\. " no -- ddchk
+follow 60 "$(svc rotv current -)"
+expect "the OK headline counts containers apart from compared services" 0 "^DEPLOY DRIFT OK - 1/1 containers run the image their tag points at \(1 deployer services compared with :latest\)" no -- ddchk
 rm -rf "$DDSTATE"
 
 echo "=== check_release_follow ==="
