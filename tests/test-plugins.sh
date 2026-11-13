@@ -307,6 +307,8 @@ STUB_MARKERS="$(cold 0)" expect "all three fresh" 0 "^COLD COPY OK - 3/3 items f
 STUB_MARKERS="$(cold 41)" expect "past warn" 1 "^COLD COPY WARNING .*Documents: aging 41d \\(warn 40d\\)" any -- cc
 STUB_MARKERS="$(cold 71)" expect "past crit" 2 "^COLD COPY CRITICAL .*Documents: STALE 71d \\(crit 70d\\)" any -- cc
 STUB_MARKERS="$(cold 39)" expect "just inside warn" 0 "^COLD COPY OK - 3/3 items fresh" any -- cc
+STUB_MARKERS="$(cold 40)" expect "exactly warn is WARNING" 1 "^COLD COPY WARNING .*Documents: aging 40d \\(warn 40d\\)" any -- cc
+STUB_MARKERS="$(cold 70)" expect "exactly crit is CRITICAL" 2 "^COLD COPY CRITICAL .*Documents: STALE 70d \\(crit 70d\\)" any -- cc
 STUB_MARKERS="$(cold 0 7)" expect "fresh but failed sync is CRITICAL" 2 "^COLD COPY CRITICAL .*last run FAILED \\(rclone exit 7\\)" any -- cc
 STUB_MARKERS="$(cold 0 | sed 's#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|oops|0#')" \
     expect "garbled marker" 2 "^COLD COPY CRITICAL .*Documents: unreadable marker" any -- cc
