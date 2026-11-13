@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.3.0] - 2026-11-13
+
+### Changed
+- **Cold Copy Freshness thresholds are now 40/70 days, up from 10/24**
+  (RT#1628). The copy moved from breetai, where it ran whenever the drive was
+  docked, to Exedore, where a timer runs it on the 2nd of each month, so a
+  healthy copy is up to ~31 days old. At 10/24 days it would have alarmed every
+  month on a working backup. Now one missed run warns and two are critical, the
+  same 70 days the pCloud monthly rotations use.
+
 ## [11.2.0] - 2026-11-12
 
 ### Added

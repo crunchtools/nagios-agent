@@ -42,11 +42,11 @@
 # is precisely the condition that alerts — and the check needs no change when
 # the drive moves to a dedicated host, because it follows the marker's hostname.
 #
-# THRESHOLDS. The trigger is physical: unlocking the drive starts the sync (pbs
-# systemd/breetai/, and cold-copy.sh explains why it is not a timer). So the
-# cadence is however often Scott docks, and the thresholds forgive travel
-# without forgiving rot: WARNING at 10 days, CRITICAL at 24. Three missed weeks
-# is a trip. Four is the micro-SD happening again.
+# THRESHOLDS. Since RT#1628 the copy lives on Exedore and runs from a monthly
+# timer (pbs systemd/exedore/, the 2nd of each month), so a fresh copy is up to
+# ~31 days old by design. WARNING at 40 days is one missed run; CRITICAL at 70
+# is two -- the same 70d the pCloud monthly rotations use. Until then it was
+# triggered by docking breetai and the thresholds were 10/24 days.
 
 # shellcheck source=collector-lib.sh
 . "$(dirname "$0")/collector-lib.sh" || { echo "COLD COPY UNKNOWN - cannot load collector-lib.sh"; exit 3; }
@@ -58,8 +58,8 @@ STALE=${STALE:-7200}
 BASE=pcloud:Backups/Rotations
 NOW=$(date +%s)
 
-WARN=${WARN:-10}   # days
-CRIT=${CRIT:-24}   # days
+WARN=${WARN:-40}   # days
+CRIT=${CRIT:-70}   # days
 
 cl_open PBKUP "COLD COPY" personal   # exits UNKNOWN "collector stale" when it must
 raw=$CL_RAW collected=$CL_AGE kicked=$CL_KICKED
