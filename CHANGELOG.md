@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- Container Storage (`check_container_storage`) from the deployed config: it
+  alerted only on developer1-3, which moved off gloval to Dolza on 2026-11-14.
+  The script stays in the image.
+- The old Josui Prime's container checks (`check_ctr_*_josui_crunchtools_com`);
+  Josui Prime moved to Dolza. conduit-josui and bridge-rcs-josui stay.
+
 ## [11.3.0] - 2026-11-13
 
 ### Changed
