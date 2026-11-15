@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.3.2] - 2026-11-14
+
+### Fixed
+- `vpn-relay` maps to `none`: josui-skills is private, so the anonymous
+  collector reported it unreadable and the check went UNKNOWN.
+
 ## [11.3.1] - 2026-11-14
 
 ### Changed
