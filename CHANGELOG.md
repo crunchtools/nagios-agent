@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.3.1] - 2026-11-14
+
+### Changed
+- `config-sources.conf` maps `vpn-relay` to `josui-skills`, which ships its
+  relay-alert forced command, and drops developer1-3 and josui.crunchtools.com.
+  Clears the UNMAPPED warning in Config drift cross-repo.
+
 ### Removed
 - Container Storage (`check_container_storage`) from the deployed config: it
   alerted only on developer1-3, which moved off gloval to Dolza on 2026-11-14.
