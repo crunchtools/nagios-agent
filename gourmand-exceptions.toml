@@ -553,3 +553,15 @@ check = "random_scripts"
 path = "rootfs/usr/local/nagios/libexec/check_image_cve.sh"
 justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
 classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/check_skills_sync.sh"
+justification = "NRPE plugin; must live at the libexec path the daemon executes it from. rootfs/ mirrors the image layout, so relocating it would break this check on the host."
+classification = "by_design"
+
+[[exceptions]]
+check = "random_scripts"
+path = "rootfs/usr/local/nagios/libexec/skills-sync-collect.sh"
+justification = "Collector the skills-sync plugin starts by its libexec path through podman_exec.sh; it ships beside the plugins it serves, so relocating it would break the kick."
+classification = "by_design"

@@ -91,6 +91,7 @@ daemon is the sole witness to its own death.
    | `config-drift-repos-collect.sh` | Config drift cross-repo | 30m / 3h |
    | `google-oauth-collect.sh` | OAuth refresh token | 2m / 10m |
    | `rotation-progress-collect.sh` | Backup rotation progress | 4m / 30m |
+   | `skills-sync-collect.sh` | Skills sync dolza, exedore | 5m / 1h |
 8. **Configuration drift, three doors** — `/srv` against its own git
    (`check_git_drift.sh`), `/etc` against its `/srv` copy
    (`check_unit_drift.sh`), and a deployed config file against any OTHER git
@@ -107,6 +108,14 @@ daemon is the sole witness to its own death.
    not run in 3h. `check_deploy_drift.sh` reads the same follower file to warn
    when a deployer-registry service has run behind its `:latest` for over
    24h, with no registry or podman read of its own.
+10. **Seats' skills** — `check_skills_sync.sh <host>` says whether every
+   seat on Dolza and Exedore runs current josui-skills (crunchtools/developer#42).
+   Neither host has an agent, so the seats' sync markers come by pCloud
+   (`pcloud:Monitoring/SkillsSync`, copied by each host's `skills-sync-push`
+   timer), the route Cold Copy Freshness takes. One service per host, worst seat
+   first: WARNING after 1h of HEAD differing from origin/main, CRITICAL after
+   6h, and WARNING for a seat in `skills-sync.conf` whose marker is missing or
+   older than 30m, or whose last good fetch is over 1h old.
 
 ## Quick start
 
