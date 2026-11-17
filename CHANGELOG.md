@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.4.0] - 2026-11-17
+
 ### Added
 - `check_skills_sync.sh <host>` and `skills-sync-collect.sh`: is every seat on
   Dolza and Exedore running current josui-skills (crunchtools/developer#42)?
