@@ -16,7 +16,7 @@ All notable changes to this project are documented here. The format follows
   detached like the backup collector. One service per host (`Skills Sync
   dolza`, `Skills Sync exedore`), the worst seat first: WARNING after 1h of
   drift from origin/main, CRITICAL after 6h; WARNING for a seat listed in
-  `skills-sync.conf` whose marker is missing or older than 30m (a dead sync
+  `skills-sync.conf` whose marker is missing or older than 45m (a dead sync
   must not look healthy) or whose last good fetch is over 1h old. The conf
   is bind-mounted into `nagios-agent.crunchtools.com`.
 

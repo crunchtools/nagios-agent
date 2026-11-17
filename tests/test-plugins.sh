@@ -363,7 +363,13 @@ STUB_MARKERS="$(seat exedore max1 diverged 22000; seat exedore max2 behind 3700)
 STUB_MARKERS="$(seat exedore max1 current 0)" \
     expect "a known seat with no marker warns" 1 "^SKILLS SYNC WARNING .*max2: no marker" any -- sk exedore
 STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 1900)" \
-    expect "a marker older than 30m warns: dead sync" 1 "^SKILLS SYNC WARNING .*max2: last report 31m ago" any -- sk exedore
+    expect "a 31m-old marker is a healthy worst case, not a dead sync" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 2650)" \
+    expect "just inside 45m is still OK" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 2750)" \
+    expect "just past 45m warns" 1 "^SKILLS SYNC WARNING .*max2: last report 45m ago" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 2800)" \
+    expect "a marker older than 45m warns: dead sync" 1 "^SKILLS SYNC WARNING .*max2: last report 46m ago" any -- sk exedore
 STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 60 4000)" \
     expect "current but no fetch for over 1h warns" 1 "^SKILLS SYNC WARNING .*max2: no successful fetch for 1h6m" any -- sk exedore
 STUB_MARKERS="$(ex_ok)" expect "another host's markers do not count" 1 "^SKILLS SYNC WARNING - dolza: 0/1 .*shared: no marker" any -- sk dolza

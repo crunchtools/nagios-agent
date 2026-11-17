@@ -19,7 +19,7 @@
 #   OK        state=current, fetched within FETCH_STALE (1h); or drift
 #             younger than WARN ("within grace")
 #   WARNING   drift older than WARN (1h); the marker is missing or older than
-#             MARKER_STALE (30m), so the sync or the push is not running;
+#             MARKER_STALE (45m), so the sync or the push is not running;
 #             or the last good fetch is older than FETCH_STALE, so "current"
 #             only means current as of then
 #   CRITICAL  drift older than CRIT (6h)
@@ -56,7 +56,9 @@ REFRESH=${REFRESH:-300}
 STALE=${STALE:-3600}
 WARN=${WARN:-3600}
 CRIT=${CRIT:-21600}
-MARKER_STALE=${MARKER_STALE:-1800}
+# A healthy marker can be ~31m old at the moment it is read: a 10m sync
+# pass, a 10m push timer, and the collector's own refresh. 45m leaves room.
+MARKER_STALE=${MARKER_STALE:-2700}
 FETCH_STALE=${FETCH_STALE:-3600}
 NOW=$(date +%s)
 

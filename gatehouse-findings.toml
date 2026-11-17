@@ -1,0 +1,7 @@
+[[findings]]
+agent = "constitution"
+category = "constitution"
+file = "rootfs/usr/local/nagios/libexec/check_skills_sync.sh"
+evidence = "MARKER_STALE=${MARKER_STALE:-2700}"
+status = "not-a-bug"
+reason = "check_skills_sync.sh has never been released: it is in CHANGELOG Unreleased under Added (#187, merged, not yet tagged). No released plugin's verdict changes; the 45m threshold ships in the same release that introduces the plugin."
