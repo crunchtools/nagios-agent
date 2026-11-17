@@ -115,7 +115,7 @@ daemon is the sole witness to its own death.
    timer), the route Cold Copy Freshness takes. One service per host, worst seat
    first: WARNING after 1h of HEAD differing from origin/main, CRITICAL after
    6h, and WARNING for a seat in `skills-sync.conf` whose marker is missing or
-   older than 30m, or whose last good fetch is over 1h old.
+   older than 45m, or whose last good fetch is over 1h old.
 
 ## Quick start
 
