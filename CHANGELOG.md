@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `check_skills_sync.sh <host>` and `skills-sync-collect.sh`: is every seat on
+  Dolza and Exedore running current josui-skills (crunchtools/developer#42)?
+  The seats now fast-forward their checkouts every 10 minutes and write a
+  `SKILLSSYNC` marker, which each host's `skills-sync-push` timer copies to
+  `pcloud:Monitoring/SkillsSync`. The collector reads every marker in one
+  `rclone cat`, keeps the last markers through a failed read, and is kicked
+  detached like the backup collector. One service per host (`Skills Sync
+  dolza`, `Skills Sync exedore`), the worst seat first: WARNING after 1h of
+  drift from origin/main, CRITICAL after 6h; WARNING for a seat listed in
+  `skills-sync.conf` whose marker is missing or older than 30m (a dead sync
+  must not look healthy) or whose last good fetch is over 1h old. The conf
+  is bind-mounted into `nagios-agent.crunchtools.com`.
+
 ## [11.3.2] - 2026-11-14
 
 ### Fixed

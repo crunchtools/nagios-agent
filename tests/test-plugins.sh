@@ -335,6 +335,58 @@ expect "status older than 2h is UNKNOWN collector stale" 3 "^COLD COPY UNKNOWN -
 rm -f "$PSTAT"
 expect "missing status file is UNKNOWN and starts the collector" 3 "^COLD COPY UNKNOWN - collector stale: no status file" yes -- chk "$CC"
 
+echo "=== check_skills_sync ==="
+# Markers from developer-skills-sync, copied to pCloud by each host's
+# skills-sync-push (crunchtools/developer#42), read with the same rclone stub.
+SCOL="$LIBEXEC/skills-sync-collect.sh"
+SK="$LIBEXEC/check_skills_sync.sh"
+SSTAT="$BSTATE/skills-sync.status"
+SCONF="$(mktemp)"
+printf '# test seats\ndolza shared\nexedore max1 max2\n' > "$SCONF"
+skcol() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$SCOL" 2>/dev/null; }
+sk() { rm -f "$SSTAT"; skcol; SEATS="$SCONF" chk "$SK" "$@"; }
+# seat <host> <seat> <state> <drift age s> [written age s] [fetched age s]
+seat() {
+    local now since; now=$(date +%s); since=0
+    [ "$3" != current ] && since=$((now - $4))
+    echo "SKILLSSYNC host=$1 seat=$2 written=$((now - ${5:-60})) state=$3 head=aaaaaaaaaaaa origin=bbbbbbbbbbbb drift_since=$since fetched=$((now - ${6:-60}))"
+}
+ex_ok() { seat exedore max1 current 0; seat exedore max2 current 0; }
+STUB_MARKERS="$(ex_ok; seat dolza shared current 0)" \
+    expect "every seat current" 0 "^SKILLS SYNC OK - exedore: 2/2 seats current .*problems=0" no -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 behind 600)" \
+    expect "drift inside an hour is grace" 0 "^SKILLS SYNC OK - exedore: 1/2 seats current" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 behind 3700)" \
+    expect "drift past 1h warns, naming the seat" 1 "^SKILLS SYNC WARNING - exedore: 1/2 seats current; worst max2: behind for 1h1m \(HEAD aaaaaaa, origin/main bbbbbbb\)" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 diverged 22000; seat exedore max2 behind 3700)" \
+    expect "drift past 6h is critical, worst seat first" 2 "^SKILLS SYNC CRITICAL - exedore: 0/2 seats current; worst max1: diverged for 6h6m" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0)" \
+    expect "a known seat with no marker warns" 1 "^SKILLS SYNC WARNING .*max2: no marker" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 1900)" \
+    expect "a marker older than 30m warns: dead sync" 1 "^SKILLS SYNC WARNING .*max2: last report 31m ago" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 60 4000)" \
+    expect "current but no fetch for over 1h warns" 1 "^SKILLS SYNC WARNING .*max2: no successful fetch for 1h6m" any -- sk exedore
+STUB_MARKERS="$(ex_ok)" expect "another host's markers do not count" 1 "^SKILLS SYNC WARNING - dolza: 0/1 .*shared: no marker" any -- sk dolza
+STUB_MARKERS="$(seat exedore max1 current 0; echo 'SKILLSSYNC host=exedore seat=max2 written=oops state=current')" \
+    expect "an unreadable marker warns" 1 "max2: unreadable marker" any -- sk exedore
+STUB_MARKERS="$(ex_ok; echo 'SKILLSSYNC host=exedore seat=max2 state=current; rm -rf /')" \
+    expect "a marker line that is not plain key=value is dropped" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
+STUB_MARKERS="" STUB_RCLONE_RC=3 expect "pCloud unreadable with nothing earlier is UNKNOWN" 3 "^SKILLS SYNC UNKNOWN - cannot read markers .*rclone exit 3" any -- sk exedore
+rm -f "$SSTAT"; STUB_MARKERS="$(ex_ok)" skcol; STUB_MARKERS="" STUB_RCLONE_RC=1 skcol
+expect "a failed read keeps the last markers" 0 "^SKILLS SYNC OK - exedore: 2/2" no -- env SEATS="$SCONF" EXEC="$KSTUBS/exec" COLLECT=/collector "$SK" exedore
+age_file "$SSTAT" 3700
+expect "markers pCloud gave over an hour ago are UNKNOWN" 3 "^SKILLS SYNC UNKNOWN - collector stale" yes -- env SEATS="$SCONF" EXEC="$KSTUBS/exec" COLLECT=/collector "$SK" exedore
+rm -f "$SSTAT"
+expect "missing status file starts the collector" 3 "^SKILLS SYNC UNKNOWN - collector stale: no status file" yes -- env SEATS="$SCONF" EXEC="$KSTUBS/exec" COLLECT=/collector "$SK" exedore
+expect "a host with no seats listed is UNKNOWN" 3 "no seats listed for lotor" any -- env SEATS="$SCONF" "$SK" lotor
+expect "a bad host name is refused" 3 "usage" any -- env SEATS="$SCONF" "$SK" '../x'
+ok_if "every host in the shipped conf has an NRPE command and a service" bash -c '
+    for h in $(awk "\$1 !~ /^#/ && NF { print \$1 }" "$1/deploy/nagios-agent/skills-sync.conf"); do
+        grep -q "^command\[check_skills_sync_$h\]=.*check_skills_sync.sh $h\$" "$1/deploy/nagios-agent/nrpe-host.cfg" || exit 1
+        grep -q "check_nrpe_command!10.88.0.1!check_skills_sync_$h\$" "$1/deploy/nagios/skills-sync.cfg" || exit 1
+    done' _ "$HERE/.."
+rm -f "$SCONF" "$SSTAT"
+
 rm -rf "$RSTUBS"
 
 echo "=== check_backup_freshness ==="
