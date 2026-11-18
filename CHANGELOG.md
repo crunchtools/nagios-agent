@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `check_openbao_remote.sh <host>` and `openbao-remote-collect.sh`: is
+  Exedore's own OpenBao (a256) unsealed and backed up? Exedore has no agent,
+  so its `openbao-health-push` timer copies an `OPENBAOHEALTH` marker
+  (`/v1/sys/health` verdict plus the newest raft snapshot's time) to
+  `pcloud:Monitoring/OpenBao`. The collector reads every marker in one
+  `rclone cat` and keeps the last markers through a failed read. The plugin
+  is CRITICAL when the store is sealed, uninitialised or unreachable, when a
+  200 still says sealed, when there is no snapshot or the newest is over 50h
+  old, or when the marker is missing or over 6h old. It is WARNING on
+  standby, on a snapshot over 26h old, or on a marker over 45m old. Service
+  `OpenBao exedore` (a259).
+
 ## [11.4.0] - 2026-11-17
 
 ### Added

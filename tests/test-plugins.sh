@@ -393,6 +393,63 @@ ok_if "every host in the shipped conf has an NRPE command and a service" bash -c
     done' _ "$HERE/.."
 rm -f "$SCONF" "$SSTAT"
 
+echo "=== check_openbao_remote ==="
+# Markers from crunchtools/openbao deploy/exedore/openbao-health-push, copied
+# to pcloud:Monitoring/OpenBao (a259), read with the same rclone stub.
+OCOL="$LIBEXEC/openbao-remote-collect.sh"
+OB="$LIBEXEC/check_openbao_remote.sh"
+OSTAT="$BSTATE/openbao-remote.status"
+ocol() { RCLONE="$RSTUBS/rclone" CONF=/dev/null "$OCOL" 2>/dev/null; }
+ob() { rm -f "$OSTAT"; ocol; chk "$OB" "$@"; }
+# bao <host> <http> <init> <sealed> <snapshot age s|none> [written age s]
+bao() {
+    local now snap; now=$(date +%s); snap=0
+    [ "$5" != none ] && snap=$((now - $5))
+    echo "OPENBAOHEALTH host=$1 written=$((now - ${6:-60})) http=$2 initialized=$3 sealed=$4 snapshot=$snap"
+}
+STUB_MARKERS="$(bao exedore 200 true false 3600)" \
+    expect "unsealed with a fresh snapshot" 0 "^OPENBAO REMOTE OK - exedore: initialized, unsealed, snapshot 1h0m old .*problems=0" no -- ob exedore
+STUB_MARKERS="$(bao exedore 503 true true 3600)" \
+    expect "sealed is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 501 false true 3600)" \
+    expect "not initialised is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: not initialised" any -- ob exedore
+STUB_MARKERS="$(bao exedore 000 unknown unknown 3600)" \
+    expect "no answer is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: no answer" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true true 3600)" \
+    expect "a 200 that says sealed is not trusted" 2 "^OPENBAO REMOTE CRITICAL - exedore: http 200 but initialized=true sealed=true" any -- ob exedore
+STUB_MARKERS="$(bao exedore 473 true false 3600)" \
+    expect "standby warns" 1 "^OPENBAO REMOTE WARNING - exedore: standby \(http 473\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 100000)" \
+    expect "a snapshot past 26h warns" 1 "^OPENBAO REMOTE WARNING - exedore: newest snapshot 27h46m old" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 200000)" \
+    expect "a snapshot past 50h is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: newest snapshot 55h33m old" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false none)" \
+    expect "no snapshot at all is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: no raft snapshot at all" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 3600 3000)" \
+    expect "a marker past 45m warns: dead push" 1 "^OPENBAO REMOTE WARNING - exedore: last report 50m ago: the push is not running" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 3600 22000)" \
+    expect "a marker past 6h is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: last report 6h6m ago" any -- ob exedore
+STUB_MARKERS="$(bao exedore 503 true true 3600 3000)" \
+    expect "every problem is listed, not only the first" 2 "^OPENBAO REMOTE CRITICAL - .*"$'\n'"SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao dolza 200 true false 3600)" \
+    expect "another host's marker does not count" 2 "^OPENBAO REMOTE CRITICAL - exedore: no marker" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=oops http=200 initialized=true sealed=false snapshot=1" \
+    expect "an unreadable marker is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: unreadable marker" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 3600; echo 'OPENBAOHEALTH host=exedore http=200; rm -rf /')" \
+    expect "a marker line that is not plain key=value is dropped" 0 "^OPENBAO REMOTE OK - exedore" any -- ob exedore
+STUB_MARKERS="" STUB_RCLONE_RC=3 expect "pCloud unreadable with nothing earlier is UNKNOWN" 3 "^OPENBAO REMOTE UNKNOWN - cannot read markers .*rclone exit 3" any -- ob exedore
+rm -f "$OSTAT"; STUB_MARKERS="$(bao exedore 200 true false 3600)" ocol; STUB_MARKERS="" STUB_RCLONE_RC=1 ocol
+expect "a failed read keeps the last markers" 0 "^OPENBAO REMOTE OK - exedore" no -- env EXEC="$KSTUBS/exec" COLLECT=/collector "$OB" exedore
+age_file "$OSTAT" 3700
+expect "markers pCloud gave over an hour ago are UNKNOWN" 3 "^OPENBAO REMOTE UNKNOWN - collector stale" yes -- env EXEC="$KSTUBS/exec" COLLECT=/collector "$OB" exedore
+rm -f "$OSTAT"
+expect "missing status file starts the collector" 3 "^OPENBAO REMOTE UNKNOWN - collector stale: no status file" yes -- env EXEC="$KSTUBS/exec" COLLECT=/collector "$OB" exedore
+expect "a bad host name is refused" 3 "usage" any -- "$OB" '../x'
+ok_if "the shipped NRPE command and service agree" bash -c '
+    grep -q "^command\[check_openbao_remote_exedore\]=.*check_openbao_remote.sh exedore\$" "$1/deploy/nagios-agent/nrpe-host.cfg" &&
+    grep -q "check_nrpe_command!10.88.0.1!check_openbao_remote_exedore\$" "$1/deploy/nagios/openbao-remote.cfg"' _ "$HERE/.."
+rm -f "$OSTAT"
+
 rm -rf "$RSTUBS"
 
 echo "=== check_backup_freshness ==="
