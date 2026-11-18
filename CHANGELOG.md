@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (verdict threshold).** `check_backup_freshness.sh` no longer reads
+  a stale dump as fresh when the uploading host's clock runs ahead (a278). pCloud keeps the mtime rclone
+  carried from that host, so:
+  - An mtime more than `SKEW` (300s) in the future is CRITICAL. Before, it
+    gave a negative age that never went stale.
+  - An mtime longer than 11 digits is CRITICAL as unreadable. Before, it
+    overflowed to a negative age.
+  - A leading zero is read as decimal. Before, bash read it as octal and the
+    arithmetic error aborted the line.
+  No other plugin dates itself from another host's clock: the nightly-dump,
+  mcp-feeds and rotation-progress times are all read on the monitored host.
+
 ## [12.0.1] - 2026-11-18
 
 ### Removed
