@@ -116,6 +116,13 @@ daemon is the sole witness to its own death.
    first: WARNING after 1h of HEAD differing from origin/main, CRITICAL after
    6h, and WARNING for a seat in `skills-sync.conf` whose marker is missing or
    older than 45m, or whose last good fetch is over 1h old.
+11. **Exedore's OpenBao** — `check_openbao_remote.sh <host>` is `check_openbao`
+   for a host with no agent. Exedore's `openbao-health-push` timer
+   (crunchtools/openbao) copies its `/v1/sys/health` verdict and newest raft
+   snapshot time to `pcloud:Monitoring/OpenBao`. Sealed, uninitialised or
+   unreachable is CRITICAL. A snapshot older than 26h is WARNING, and one older
+   than 50h, or none at all, is CRITICAL. A marker older than 45m is WARNING,
+   and one older than 6h, or none, is CRITICAL.
 
 ## Quick start
 
