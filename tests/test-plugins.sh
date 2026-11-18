@@ -2187,13 +2187,15 @@ STUB
 chmod +x "$CSD/exec"
 cs() { EXEC="$CSD/exec" "$CS" "$@"; }
 G=1073741824
-# 3 GB of images in each sandbox is 9 GB alerted; the 17 GB runner cache and the
+# 3 GB of images in each sandbox is 9 GB alerted; a 17 GB context cache and the
 # 7.26 GB volume in every store must stay out of that sum. Plain prefix
 # assignments, not env: expect is a shell function.
-CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
+CONTEXT=layer-cache CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_layer_cache=$((17*G)):30 \
     expect "images under warn are OK, volumes excluded" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G" any -- cs
-CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
-    expect "the runner cache is reported but not counted" 0 "gha-runner-cached 17\.0G/30 \(cache, not counted\)" any -- cs
+CONTEXT=layer-cache CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_layer_cache=$((17*G)):30 \
+    expect "a context cache is reported but not counted" 0 "layer-cache 17\.0G/30 \(cache, not counted\)" any -- cs
+CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
+    expect "no context cache by default" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G" any -- cs
 # The Images row is selected by its Type, so podman reordering the table cannot
 # make the 7.26 GB volume look like images and trip the thresholds.
 CS_developer1=VOLFIRST:$((3*G)):4 CS_developer2=VOLFIRST:$((3*G)):4 CS_developer3=VOLFIRST:$((3*G)):4 \
@@ -2202,10 +2204,10 @@ CS_developer1=$((9*G)):12 CS_developer2=$((9*G)):12 CS_developer3=$((9*G)):12 \
     expect "27G of images is WARNING and names the prune" 1 "^CONTAINER STORAGE WARNING - sandbox images 27\.0G \(warn 24G\), is container-storage-prune running" any -- cs
 CS_developer1=$((13*G)):18 CS_developer2=$((13*G)):18 CS_developer3=$((13*G)):18 \
     expect "39G of images is CRITICAL" 2 "^CONTAINER STORAGE CRITICAL - sandbox images 39\.0G \(crit 36G\)" any -- cs
-# An absent container is idle, not broken: gha-runner-cached runs --rm with
-# Restart=always and is legitimately gone between CI jobs.
-CS_developer1=$((3*G)):4 CS_developer3=$((3*G)):4 \
-    expect "a sandbox that is idle is named and not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 6\.0G.*idle: developer2 \(not running\), gha-runner-cached \(not running\)" any -- cs
+# An absent container is idle, not broken: a stopped seat, or a cache
+# container that runs --rm, is legitimately gone between uses.
+CONTEXT=layer-cache CS_developer1=$((3*G)):4 CS_developer3=$((3*G)):4 \
+    expect "a sandbox that is idle is named and not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 6\.0G.*idle: developer2 \(not running\), layer-cache \(not running\)" any -- cs
 # A dead socket is NOT idle. Saying OK on a store we could not read would be a
 # lie, and it is the failure that hides a growing store.
 CS_developer1=$((3*G)):4 CS_developer2=ERROR CS_developer3=$((3*G)):4 \
@@ -2217,16 +2219,16 @@ CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
     expect "thresholds are overridable" 1 "^CONTAINER STORAGE WARNING - sandbox images 9\.0G \(warn 8G\)" any -- cs 8 36
 # Naming services replaces the alerted set and clears the context set, so a
 # cache named explicitly does count -- the usage text says so.
-CS_developer1=$((3*G)):4 CS_gha_runner_cached=$((17*G)):30 \
-    expect "an explicit service list replaces both sets" 1 "^CONTAINER STORAGE WARNING - sandbox images 20\.0G \(warn 10G\).*gha-runner-cached 17\.0G/30" any -- cs 10 36 developer1 gha-runner-cached
+CONTEXT=layer-cache CS_developer1=$((3*G)):4 CS_layer_cache=$((17*G)):30 \
+    expect "an explicit service list replaces both sets" 1 "^CONTAINER STORAGE WARNING - sandbox images 20\.0G \(warn 10G\).*layer-cache 17\.0G/30" any -- cs 10 36 developer1 layer-cache
 # A present Images row with a non-numeric field is not the same as a missing
 # one, and both have to be UNKNOWN rather than counted as zero.
 CS_developer1=$((3*G)):4 CS_developer2=BADNUM CS_developer3=$((3*G)):4 \
     expect "a malformed Images row is UNKNOWN" 3 "^CONTAINER STORAGE UNKNOWN - a store could not be read:.*unreadable: developer2 \(unparseable Images row" any -- cs
 # A cache we cannot read is reported, but it must not change the verdict: the
 # check already says it does not judge that store.
-CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_gha_runner_cached=ERROR \
-    expect "an unreadable cache is reported but not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G.*unreadable cache: gha-runner-cached \(exec failed" any -- cs
+CONTEXT=layer-cache CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 CS_layer_cache=ERROR \
+    expect "an unreadable cache is reported but not fatal" 0 "^CONTAINER STORAGE OK - sandbox images 9\.0G of 24G.*unreadable cache: layer-cache \(exec failed" any -- cs
 # `shift 2` with a single argument shifts nothing, so that argument used to fall
 # through into the service list and the check watched a service named "30".
 CS_developer1=$((3*G)):4 CS_developer2=$((3*G)):4 CS_developer3=$((3*G)):4 \
