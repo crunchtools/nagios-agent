@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Config drift cross-repo went WARNING three ways (a268):
+  - `ashigaru.crunchtools.com` was UNMAPPED. `config-sources.conf` now maps
+    it to `ashigaru`, the public repo that builds the Desk's image.
+  - `deploy/nagios-agent/nrpe-ctr.cfg` lacked the two Ashigaru container
+    checks gloval runs. It is synced back from `/srv`, which is the
+    authoritative copy.
+  - `deploy/nagios/lotor-mail.cfg` still described the NRPE design that a160
+    replaced with SSH and tunnel checks run from gloval. Nothing deployed from
+    it, so it is deleted: `/srv` is its only home.
+
 ## [11.5.0] - 2026-11-18
 
 ### Added
