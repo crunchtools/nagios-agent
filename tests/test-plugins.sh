@@ -532,6 +532,18 @@ within 6 "timed-out listing stays inside the collector budget"
 STUB_GONE=rt4.sql STUB_SLOW=feeds.db PROBE_T=1 BUDGET=8 \
     expect "MISSING outranks TIMEOUT" 2 "^BACKUPS CRITICAL - rt-db: MISSING .*\\[\\+1 more\\].*unknown=1 .*"$'\n'"rt-db: MISSING.*"$'\n'"mcp-feeds-db: TIMEOUT" any -- bf
 STUB_SIZE=10 expect "shrunken dump" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: TOO SMALL 10B" any -- bf
+# pCloud keeps the uploading host's mtime: a clock running ahead must not read as fresh.
+STUB_AGE=-2 expect "mtime days in the future is CRITICAL" 2 "^BACKUPS CRITICAL - [a-z0-9-]+: dated 1d in the future: the uploading host's clock is wrong \\[\\+18 more\\]" any -- bf
+rm -f "$BSTAT"; scol
+sed -i -E "/item=rt-db /s/epoch=[0-9]+/epoch=$(( $(date +%s) + 1250 ))/" "$BSTAT"
+expect "mtime 20m in the future is CRITICAL" 2 "^BACKUPS CRITICAL - rt-db: dated 20m in the future: the uploading host's clock is wrong; Weekly-1 14/15" any -- chk "$BF"
+sed -i -E "/item=rt-db /s/epoch=[0-9]+/epoch=$(( $(date +%s) + 120 ))/" "$BSTAT"
+expect "mtime inside SKEW is judged, not flagged" 0 "^BACKUPS OK - Weekly-1 15/15 fresh" any -- chk "$BF"
+sed -i -E "/item=rt-db /s/epoch=[0-9]+/epoch=99999999999999999999/" "$BSTAT"
+expect "overflowing mtime is CRITICAL, not fresh" 2 "^BACKUPS CRITICAL - rt-db: unreadable mtime" any -- chk "$BF"
+# With a leading 0 bash reads octal, and an epoch holding an 8 or 9 is not octal.
+sed -i -E "/item=rt-db /s/epoch=[0-9]+/epoch=0$(( $(date +%s) - 20 * 86400 - 3600 ))/" "$BSTAT"
+expect "leading-zero mtime is read base 10" 2 "^BACKUPS CRITICAL - rt-db: STALE 20d" any -- chk "$BF"
 
 # --- in-flight guard (RT #1566) -------------------------------------------
 # A weekly Servers run moves ~15 GiB in ~144k files over ~10 hours, so for most

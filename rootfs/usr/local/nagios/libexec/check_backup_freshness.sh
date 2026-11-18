@@ -18,7 +18,8 @@
 #   UNCHECKED  a pbs run of this mode is still uploading, so an item that is
 #              not at the destination yet is not judged (RT #1566)
 #   CRITICAL   dump missing (rclone exit 3/4 or an empty listing), or below its
-#              size floor
+#              size floor; an unreadable mtime, or one more than SKEW (5m) in
+#              the future
 #   UNKNOWN    the status file is missing or older than STALE (2h): "collector
 #              stale"; or one sentinel pCloud has not answered for in STALE
 #              (the collector keeps the last real answer through a timeout)
@@ -32,6 +33,10 @@ COLLECT=${COLLECT:-/usr/local/nagios/libexec/backup-freshness-collect.sh}
 CONTAINER=${CONTAINER:-nagios-agent.crunchtools.com}
 REFRESH=${REFRESH:-1200}   # seconds: start a collector run when the file is this old
 STALE=${STALE:-7200}       # seconds: older than this and the data is not trusted
+# How far ahead of this clock an mtime may be before it is a wrong clock, not
+# skew. pCloud keeps the mtime rclone carried from the uploading host, so a host
+# running ahead would make a stale dump read as fresh: it would never age.
+SKEW=${SKEW:-300}
 NOW=$(date +%s)
 
 W_WARN=9  W_CRIT=16    # days
@@ -58,13 +63,23 @@ while IFS= read -r line; do
     case "$result" in
         ok)
             epoch=$(cl_field epoch "$line"); size=$(cl_field size "$line")
-            age=$(( (NOW - epoch) / 86400 ))
-            rank=$R_OK; msg="$label: ${age}d"
-            if   [ "$age" -ge "$crit" ]; then rank=$R_CRIT; msg="$label: STALE ${age}d (crit ${crit}d)"
-            elif [ "$age" -ge "$warn" ]; then rank=$R_WARN; msg="$label: aging ${age}d (warn ${warn}d)"
-            fi
-            if [ "$size" -lt "$floor" ] 2>/dev/null; then
-                rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${floor}B), age ${age}d"
+            if ! [[ $epoch =~ ^[0-9]{1,11}$ ]]; then
+                # At most 11 digits: longer overflows to a negative age, which reads as fresh.
+                rank=$R_CRIT; msg="$label: unreadable mtime '${epoch:0:20}'"
+            elif epoch=$((10#$epoch)); [ $((epoch - NOW)) -gt "$SKEW" ]; then
+                # Base 10 above: bash reads a leading 0 as octal and fails on 08 or 09.
+                ahead=$((epoch - NOW))
+                if [ "$ahead" -ge 86400 ]; then ahead="$((ahead / 86400))d"; else ahead="$((ahead / 60))m"; fi
+                rank=$R_CRIT; msg="$label: dated $ahead in the future: the uploading host's clock is wrong"
+            else
+                age=$(( (NOW - epoch) / 86400 ))
+                rank=$R_OK; msg="$label: ${age}d"
+                if   [ "$age" -ge "$crit" ]; then rank=$R_CRIT; msg="$label: STALE ${age}d (crit ${crit}d)"
+                elif [ "$age" -ge "$warn" ]; then rank=$R_WARN; msg="$label: aging ${age}d (warn ${warn}d)"
+                fi
+                if [ "$size" -lt "$floor" ] 2>/dev/null; then
+                    rank=$R_CRIT; msg="$label: TOO SMALL ${size}B (floor ${floor}B), age ${age}d"
+                fi
             fi ;;
         missing)   rank=$R_CRIT;      msg="$label: MISSING ($(cl_field path "$line"))" ;;
         # A pbs run of this mode was still uploading when the collector looked,
