@@ -431,6 +431,20 @@ STUB_MARKERS="$(bao exedore 200 true false 3600 22000)" \
     expect "a marker past 6h is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: last report 6h6m ago" any -- ob exedore
 STUB_MARKERS="$(bao exedore 503 true true 3600 3000)" \
     expect "every problem is listed, not only the first" 2 "^OPENBAO REMOTE CRITICAL - .*"$'\n'"SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 503 true true 3600 3000)" \
+    expect "the headline is the worst problem, not the first" 2 "^OPENBAO REMOTE CRITICAL - exedore: SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 429 true true 3600)" \
+    expect "standby that says sealed is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: standby \(http 429\) but sealed=true" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 3600 -99999999)" \
+    expect "a marker written in the future is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: marker dated .* in the future" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false -99999999)" \
+    expect "a snapshot dated in the future is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: newest snapshot dated .* in the future" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=99999999999999999999 http=200 initialized=true sealed=false snapshot=$(date +%s)" \
+    expect "a number too long to be a time is unreadable" 2 "^OPENBAO REMOTE CRITICAL - exedore: unreadable marker" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=0$(( $(date +%s) - 864000 )) http=200 initialized=true sealed=false snapshot=$(date +%s)" \
+    expect "a leading zero is decimal, not octal" 2 "^OPENBAO REMOTE CRITICAL - exedore: last report 240h0m ago" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=$(date +%s) http=200 initialized=true sealed=false snapshot=09" \
+    expect "a leading-zero snapshot is decimal, not octal" 2 "^OPENBAO REMOTE CRITICAL - exedore: newest snapshot [0-9]+h[0-9]+m old" any -- ob exedore
 STUB_MARKERS="$(bao dolza 200 true false 3600)" \
     expect "another host's marker does not count" 2 "^OPENBAO REMOTE CRITICAL - exedore: no marker" any -- ob exedore
 STUB_MARKERS="OPENBAOHEALTH host=exedore written=oops http=200 initialized=true sealed=false snapshot=1" \

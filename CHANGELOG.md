@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (verdict threshold).** `check_openbao_remote.sh` no longer reads OK
+  on a marker it should not trust:
+  - A `written` or `snapshot` time more than `SKEW` (300s) in the future is
+    CRITICAL. Before, it gave a negative age that never went stale.
+  - A number longer than 11 digits is an unreadable marker. Before, it
+    overflowed to a negative age.
+  - A leading zero is read as decimal. Before, bash read it as octal, the
+    arithmetic error left the age empty, and every threshold test passed.
+  - A standby code that says `sealed=true` is CRITICAL, not WARNING.
+
+  Per the constitution, a verdict-threshold change is MAJOR: release as 12.0.0.
+- The headline names the worst problem, not the first one found, so a sealed
+  vault no longer reads as a late push.
+
 ### Fixed
 - Config drift cross-repo went WARNING three ways (a268):
   - `ashigaru.crunchtools.com` was UNMAPPED. `config-sources.conf` now maps

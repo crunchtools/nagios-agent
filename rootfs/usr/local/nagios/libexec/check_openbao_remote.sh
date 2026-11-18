@@ -16,7 +16,8 @@
 #             than 45m, so the push timer or the host has stopped reporting
 #   CRITICAL  sealed, not initialised, or no answer at all; no snapshot ever,
 #             or the newest older than SNAP_CRIT (50h, two missed nights); no
-#             marker, or one older than MARKER_CRIT (6h)
+#             marker, or one older than MARKER_CRIT (6h); a marker or snapshot
+#             time more than SKEW (5m) in the future; standby that says sealed
 #   UNKNOWN   the collector is stale or could not read pCloud
 #
 # A missing or 6h-old marker is CRITICAL, not WARNING as in Skills Sync: this is
@@ -45,6 +46,9 @@ MARKER_WARN=${MARKER_WARN:-2700}
 MARKER_CRIT=${MARKER_CRIT:-21600}
 SNAP_WARN=${SNAP_WARN:-93600}
 SNAP_CRIT=${SNAP_CRIT:-180000}
+# How far ahead of this clock a pushed time may be before it is a wrong clock,
+# not skew. A time in the future would otherwise never age.
+SKEW=${SKEW:-300}
 NOW=$(date +%s)
 
 cl_open OBHEALTH "OPENBAO REMOTE"   # exits UNKNOWN "collector stale" when it must
@@ -76,24 +80,34 @@ fi
 written=$(cl_field written "$line"); http=$(cl_field http "$line")
 init=$(cl_field initialized "$line"); sealed=$(cl_field sealed "$line")
 snap=$(cl_field snapshot "$line")
-if ! [[ $written =~ ^[0-9]+$ && $snap =~ ^[0-9]+$ && $http =~ ^[0-9]{3}$ ]]; then
+# At most 11 digits: an epoch second, with room. Longer would overflow bash's
+# arithmetic and wrap to a negative age, which reads as fresh.
+if ! [[ $written =~ ^[0-9]{1,11}$ && $snap =~ ^[0-9]{1,11}$ && $http =~ ^[0-9]{3}$ ]]; then
     echo "OPENBAO REMOTE CRITICAL - $HOST: unreadable marker | $perf"
     exit 2
 fi
+# Base 10: bash reads a leading 0 as octal, fails on 08 or 09, and the empty
+# results then pass every test below.
+written=$((10#$written)) snap=$((10#$snap))
 
 dur() { if [ "$1" -ge 3600 ]; then cl_hm "$1"; else echo "$(( $1 / 60 ))m"; fi; }
-status=0 problems=()
-flag() { [ "$1" -gt "$status" ] && status=$1; problems+=("$2"); }
+# The headline is the first of the worst problems, not the first found: a
+# sealed vault must not read as a late push.
+status=0 worst= problems=()
+flag() { if [ "$1" -gt "$status" ]; then status=$1 worst=$2; fi; problems+=("$2"); }
 
 age=$((NOW - written))
-if   [ "$age" -ge "$MARKER_CRIT" ]; then flag 2 "last report $(dur "$age") ago: the push or the host is down"
+if   [ "$age" -lt "-$SKEW" ]; then flag 2 "marker dated $(dur $((-age))) in the future: $HOST's clock is wrong"
+elif [ "$age" -ge "$MARKER_CRIT" ]; then flag 2 "last report $(dur "$age") ago: the push or the host is down"
 elif [ "$age" -ge "$MARKER_WARN" ]; then flag 1 "last report $(dur "$age") ago: the push is not running"
 fi
 
 case $http in
     200) [ "$init" = true ] && [ "$sealed" = false ] \
             || flag 2 "http 200 but initialized=$init sealed=$sealed" ;;
-    429|472|473) flag 1 "standby (http $http)" ;;
+    429|472|473) [ "$sealed" = false ] \
+            && flag 1 "standby (http $http)" \
+            || flag 2 "standby (http $http) but sealed=$sealed" ;;
     501) flag 2 "not initialised (http 501)" ;;
     503) flag 2 "SEALED (http 503)" ;;
     000) flag 2 "no answer from the server" ;;
@@ -105,7 +119,8 @@ if [ "$snap" -eq 0 ]; then
     flag 2 "no raft snapshot at all"
 else
     snap_age=$((NOW - snap))
-    if   [ "$snap_age" -ge "$SNAP_CRIT" ]; then flag 2 "newest snapshot $(dur "$snap_age") old (crit $(dur "$SNAP_CRIT"))"
+    if   [ "$snap_age" -lt "-$SKEW" ]; then flag 2 "newest snapshot dated $(dur $((-snap_age))) in the future: $HOST's clock is wrong"
+    elif [ "$snap_age" -ge "$SNAP_CRIT" ]; then flag 2 "newest snapshot $(dur "$snap_age") old (crit $(dur "$SNAP_CRIT"))"
     elif [ "$snap_age" -ge "$SNAP_WARN" ]; then flag 1 "newest snapshot $(dur "$snap_age") old (warn $(dur "$SNAP_WARN"))"
     fi
 fi
@@ -114,7 +129,7 @@ case $status in 0) word=OK;; 1) word=WARNING;; *) word=CRITICAL;; esac
 if [ "$status" -eq 0 ]; then
     summary="$HOST: initialized, unsealed, snapshot $(dur "$snap_age") old"
 else
-    summary="$HOST: ${problems[0]}"
+    summary="$HOST: $worst"
 fi
 echo "OPENBAO REMOTE $word - $summary (reported $(dur "$age") ago)${kicked} | snapshot_age=${snap_age}s;$SNAP_WARN;$SNAP_CRIT marker_age=${age}s;$MARKER_WARN;$MARKER_CRIT problems=${#problems[@]} $perf"
 for p in "${problems[@]}"; do echo "$p"; done
