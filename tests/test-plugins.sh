@@ -266,6 +266,12 @@ STUB_MARKERS="$(markers 2 40 | grep -v 'Downloads|Monthly-2')" \
     expect "one missing marker" 2 "CRITICAL .*Monthly-2 2/3 .*Downloads/Monthly-2: MISSING marker" any -- pb
 STUB_MARKERS="$(markers 2 40 | sed 's/^Files|Autosync|Weekly-1|.*/Files|Autosync|Weekly-1|oops/')" \
     expect "garbled marker" 2 "CRITICAL .*Autosync/Weekly-1: unreadable marker" any -- pb
+STUB_MARKERS="$(markers 2 40 | sed "s/^Files|Autosync|Weekly-1|0|[0-9]*|/Files|Autosync|Weekly-1|0|$(( $(date +%s) + 99999999 ))|/")" \
+    expect "a finish time in the future is critical" 2 "CRITICAL .*Autosync/Weekly-1: finished .* in the future" any -- pb
+STUB_MARKERS="$(markers 2 40 | sed "s/^Files|Autosync|Weekly-1|0|[0-9]*|/Files|Autosync|Weekly-1|0|0$(( $(date +%s) - 16 * 86400 ))|/")" \
+    expect "a leading zero is decimal, not octal" 2 "CRITICAL .*Autosync/Weekly-1: STALE 16d" any -- pb
+STUB_MARKERS="$(markers 2 40 | sed 's/^Files|Autosync|Weekly-1|0|[0-9]*|/Files|Autosync|Weekly-1|0|99999999999999999999|/')" \
+    expect "a number too long to be a time is unreadable" 2 "CRITICAL .*Autosync/Weekly-1: unreadable marker" any -- pb
 STUB_MARKERS="" STUB_RCLONE_RC=3 expect "no markers at all" 2 "CRITICAL - cannot read markers .*rclone exit 3" any -- pb
 STUB_MARKERS="" expect "empty folder" 2 "CRITICAL - cannot read markers .*rclone exit 0" any -- pb
 STUB_MARKERS="$(markers 2 40)" STUB_RCLONE_RC=1 expect "failed read is not judged on partial output" 2 "CRITICAL - cannot read markers .*rclone exit 1" any -- pb
@@ -312,6 +318,12 @@ STUB_MARKERS="$(cold 70)" expect "exactly crit is CRITICAL" 2 "^COLD COPY CRITIC
 STUB_MARKERS="$(cold 0 7)" expect "fresh but failed sync is CRITICAL" 2 "^COLD COPY CRITICAL .*last run FAILED \\(rclone exit 7\\)" any -- cc
 STUB_MARKERS="$(cold 0 | sed 's#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|oops|0#')" \
     expect "garbled marker" 2 "^COLD COPY CRITICAL .*Documents: unreadable marker" any -- cc
+STUB_MARKERS="$(cold 0 | sed "s#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|$(( $(date +%s) + 99999999 ))|0#")" \
+    expect "a finish time in the future is critical" 2 "^COLD COPY CRITICAL .*Documents: finished .* in the future" any -- cc
+STUB_MARKERS="$(cold 0 | sed "s#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|0$(( $(date +%s) - 71 * 86400 ))|0#")" \
+    expect "a leading zero is decimal, not octal" 2 "^COLD COPY CRITICAL .*Documents: STALE 71d" any -- cc
+STUB_MARKERS="$(cold 0 | sed 's#^ColdCopy|Documents|.*#ColdCopy|Documents|breetai.dc2.crunchtools.com|0|99999999999999999999|0#')" \
+    expect "a number too long to be a time is unreadable" 2 "^COLD COPY CRITICAL .*Documents: unreadable marker" any -- cc
 
 # The Gatehouse finding on #149: an unnamed item used to be skipped with
 # `continue`, so a marker set of nothing but malformed lines left total at 0 and
@@ -375,6 +387,18 @@ STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 60 4000
 STUB_MARKERS="$(ex_ok)" expect "another host's markers do not count" 1 "^SKILLS SYNC WARNING - dolza: 0/1 .*shared: no marker" any -- sk dolza
 STUB_MARKERS="$(seat exedore max1 current 0; echo 'SKILLSSYNC host=exedore seat=max2 written=oops state=current')" \
     expect "an unreadable marker warns" 1 "max2: unreadable marker" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 -99999999)" \
+    expect "a marker written in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 60 -99999999)" \
+    expect "a fetch dated in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 behind -99999999)" \
+    expect "drift dated in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 | sed 's/ written=/ written=0/')" \
+    expect "a leading zero is decimal, not octal" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 2800 | sed 's/ written=/ written=0/')" \
+    expect "an old marker with a leading zero still warns" 1 "^SKILLS SYNC WARNING .*max2: last report 46m ago" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 | sed 's/ written=[0-9]*/ written=99999999999999999999/')" \
+    expect "a number too long to be a time is unreadable" 1 "max2: unreadable marker" any -- sk exedore
 STUB_MARKERS="$(ex_ok; echo 'SKILLSSYNC host=exedore seat=max2 state=current; rm -rf /')" \
     expect "a marker line that is not plain key=value is dropped" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
 STUB_MARKERS="" STUB_RCLONE_RC=3 expect "pCloud unreadable with nothing earlier is UNKNOWN" 3 "^SKILLS SYNC UNKNOWN - cannot read markers .*rclone exit 3" any -- sk exedore
@@ -431,6 +455,20 @@ STUB_MARKERS="$(bao exedore 200 true false 3600 22000)" \
     expect "a marker past 6h is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: last report 6h6m ago" any -- ob exedore
 STUB_MARKERS="$(bao exedore 503 true true 3600 3000)" \
     expect "every problem is listed, not only the first" 2 "^OPENBAO REMOTE CRITICAL - .*"$'\n'"SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 503 true true 3600 3000)" \
+    expect "the headline is the worst problem, not the first" 2 "^OPENBAO REMOTE CRITICAL - exedore: SEALED \(http 503\)" any -- ob exedore
+STUB_MARKERS="$(bao exedore 429 true true 3600)" \
+    expect "standby that says sealed is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: standby \(http 429\) but sealed=true" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false 3600 -99999999)" \
+    expect "a marker written in the future is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: marker dated .* in the future" any -- ob exedore
+STUB_MARKERS="$(bao exedore 200 true false -99999999)" \
+    expect "a snapshot dated in the future is critical" 2 "^OPENBAO REMOTE CRITICAL - exedore: newest snapshot dated .* in the future" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=99999999999999999999 http=200 initialized=true sealed=false snapshot=$(date +%s)" \
+    expect "a number too long to be a time is unreadable" 2 "^OPENBAO REMOTE CRITICAL - exedore: unreadable marker" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=0$(( $(date +%s) - 864000 )) http=200 initialized=true sealed=false snapshot=$(date +%s)" \
+    expect "a leading zero is decimal, not octal" 2 "^OPENBAO REMOTE CRITICAL - exedore: last report 240h0m ago" any -- ob exedore
+STUB_MARKERS="OPENBAOHEALTH host=exedore written=$(date +%s) http=200 initialized=true sealed=false snapshot=09" \
+    expect "a leading-zero snapshot is decimal, not octal" 2 "^OPENBAO REMOTE CRITICAL - exedore: newest snapshot [0-9]+h[0-9]+m old" any -- ob exedore
 STUB_MARKERS="$(bao dolza 200 true false 3600)" \
     expect "another host's marker does not count" 2 "^OPENBAO REMOTE CRITICAL - exedore: no marker" any -- ob exedore
 STUB_MARKERS="OPENBAOHEALTH host=exedore written=oops http=200 initialized=true sealed=false snapshot=1" \
