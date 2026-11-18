@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.5.0] - 2026-11-18
+
 ### Added
 - `check_openbao_remote.sh <host>` and `openbao-remote-collect.sh`: is
   Exedore's own OpenBao (a256) unsealed and backed up? Exedore has no agent,
