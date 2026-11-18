@@ -57,6 +57,9 @@ REFRESH=${REFRESH:-1200}
 STALE=${STALE:-7200}
 BASE=pcloud:Backups/Rotations
 NOW=$(date +%s)
+# How far ahead of this clock a pushed time may be before it is a wrong clock,
+# not skew. A time in the future would otherwise never age.
+SKEW=${SKEW:-300}
 
 WARN=${WARN:-40}   # days
 CRIT=${CRIT:-70}   # days
@@ -116,8 +119,12 @@ while IFS='|' read -r _ item host _ finished rclone_exit; do
 
     if [ "$st" -ne 0 ]; then
         :
-    elif ! [[ $finished =~ ^[0-9]+$ && $rclone_exit =~ ^[0-9]+$ ]]; then
+    elif ! [[ $finished =~ ^[0-9]{1,11}$ && $rclone_exit =~ ^[0-9]{1,3}$ ]]; then
+        # At most 11 digits: longer overflows to a negative age, which reads as fresh.
         st=2; msg="$item: unreadable marker"
+    elif finished=$((10#$finished)) rclone_exit=$((10#$rclone_exit)); [ $((finished - NOW)) -gt "$SKEW" ]; then
+        # Base 10 above: bash reads a leading 0 as octal and fails on 08 or 09.
+        st=2; msg="$item: finished $(( (finished - NOW) / 86400 ))d in the future: the host's clock is wrong"
     else
         age=$(( (NOW - finished) / 86400 ))
         [ "$age" -gt "$worst" ] && worst=$age

@@ -17,6 +17,14 @@ All notable changes to this project are documented here. The format follows
     arithmetic error left the age empty, and every threshold test passed.
   - A standby code that says `sealed=true` is CRITICAL, not WARNING.
 
+- **BREAKING (verdict threshold).** The same fail-open closed in the other
+  plugins that judge times pushed by another host: `check_skills_sync.sh`
+  (`written`, `drift_since`, `fetched`), `check_personal_backup_freshness.sh`
+  and `check_cold_copy_freshness.sh` (`finished`). A leading zero made a
+  16-day-old weekly backup marker read OK. A time more than `SKEW` in the
+  future is now flagged (CRITICAL for the backups, WARNING for a skills-sync
+  seat, matching each plugin's dead-marker severity).
+
   Per the constitution, a verdict-threshold change is MAJOR: release as 12.0.0.
 - The headline names the worst problem, not the first one found, so a sealed
   vault no longer reads as a late push.

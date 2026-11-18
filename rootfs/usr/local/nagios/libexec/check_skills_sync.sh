@@ -61,6 +61,9 @@ CRIT=${CRIT:-21600}
 MARKER_STALE=${MARKER_STALE:-2700}
 FETCH_STALE=${FETCH_STALE:-3600}
 NOW=$(date +%s)
+# How far ahead of this clock a pushed time may be before it is a wrong clock,
+# not skew. A time in the future would otherwise never age.
+SKEW=${SKEW:-300}
 
 cl_open SKSYNC "SKILLS SYNC"   # exits UNKNOWN "collector stale" when it must
 raw=$CL_RAW collected=$CL_AGE kicked=$CL_KICKED
@@ -95,8 +98,13 @@ for seat in "${expected[@]}"; do
         written=$(cl_field written "$line"); state=$(cl_field state "$line")
         since=$(cl_field drift_since "$line"); fetched=$(cl_field fetched "$line")
         head=$(cl_field head "$line"); origin=$(cl_field origin "$line")
-        if ! [[ $written =~ ^[0-9]+$ && $since =~ ^[0-9]+$ && $fetched =~ ^[0-9]+$ && -n $state ]]; then
+        # At most 11 digits: longer overflows to a negative age, which reads
+        # as fresh. Base 10 after: bash reads a leading 0 as octal.
+        if ! [[ $written =~ ^[0-9]{1,11}$ && $since =~ ^[0-9]{1,11}$ && $fetched =~ ^[0-9]{1,11}$ && -n $state ]]; then
             st=1; msg="$seat: unreadable marker"
+        elif written=$((10#$written)) since=$((10#$since)) fetched=$((10#$fetched))
+             [ $((written - NOW)) -gt "$SKEW" ]; then
+            st=1; msg="$seat: marker dated $(dur $((written - NOW))) in the future: the host's clock is wrong"
         elif [ $((NOW - written)) -ge "$MARKER_STALE" ]; then
             st=1; msg="$seat: last report $(dur $((NOW - written))) ago: the sync or the push is not running"
         elif [ "$state" = current ]; then
