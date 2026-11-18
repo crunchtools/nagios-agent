@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [11.5.1] - 2026-11-18
+
 ### Fixed
 - Config drift cross-repo went WARNING three ways (a268):
   - `ashigaru.crunchtools.com` was UNMAPPED. `config-sources.conf` now maps
