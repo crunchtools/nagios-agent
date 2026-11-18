@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [13.0.0] - 2026-11-18
+
 ### Changed
 - **BREAKING (verdict threshold).** `check_backup_freshness.sh` no longer reads
   a stale dump as fresh when the uploading host's clock runs ahead (a278). pCloud keeps the mtime rclone
