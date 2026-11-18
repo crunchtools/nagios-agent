@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [12.0.0] - 2026-11-18
+
 ### Changed
 - **BREAKING (verdict threshold).** `check_openbao_remote.sh` no longer reads OK
   on a marker it should not trust:
