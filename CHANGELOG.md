@@ -6,9 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-- `check_backup_freshness.sh` no longer reads a stale dump as fresh when the
-  uploading host's clock runs ahead (a278). pCloud keeps the mtime rclone
+### Changed
+- **BREAKING (verdict threshold).** `check_backup_freshness.sh` no longer reads
+  a stale dump as fresh when the uploading host's clock runs ahead (a278). pCloud keeps the mtime rclone
   carried from that host, so:
   - An mtime more than `SKEW` (300s) in the future is CRITICAL. Before, it
     gave a negative age that never went stale.
