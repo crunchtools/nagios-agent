@@ -7,11 +7,11 @@
 #                      alerted services' image bytes, not to any one store.
 #   service ...        optional. Naming services REPLACES the default alerted
 #                      set (developer1 developer2 developer3) AND clears the
-#                      context-only set (gha-runner-cached), so everything named
+#                      context-only set (empty by default), so everything named
 #                      counts toward the thresholds. Env ALERTED and CONTEXT set
 #                      the two lists independently.
 #
-# WHAT THIS IS FOR. developer1-3 and gha-runner-cached each run their own podman
+# WHAT THIS IS FOR. developer1-3 each run their own podman
 # inside the service container, with its own storage under
 # /srv/<svc>/data/containers. Nothing used to remove anything from them: on
 # 2026-11-08 they held 1,190,137 files and 49.5 GiB, mostly the same image over
@@ -34,10 +34,10 @@
 # every pre-commit run for disk we are not short of (/var is 943 GB at 15%).
 # Summing the whole tree would bury the signal under it.
 #
-# WHY gha-runner-cached IS CONTEXT, NOT ALERTED ON. Its unit calls it a
-# "persistent layer cache" and its 17.4 GiB is the point. The prune only takes
-# dangling layers there, so its size is not evidence of anything and is reported
-# without counting toward the thresholds.
+# WHY A CONTEXT SET. A store that is a cache by design (a CI runner's
+# persistent layer cache) is big on purpose, so its size is not evidence of
+# anything: it is reported without counting toward the thresholds. The default
+# is empty; CONTEXT names one.
 #
 # Store metadata, not a filesystem walk: all four answer in about 2s, so this
 # runs in the fast NRPE pool without the memory spike that OOM-killed the
@@ -52,7 +52,7 @@ CRIT_GB=${2:-36}
 # service called "30" and found nothing.
 [ $# -gt 2 ] && shift 2 || shift $#
 ALERTED=${ALERTED:-"developer1 developer2 developer3"}
-CONTEXT=${CONTEXT:-"gha-runner-cached"}
+CONTEXT=${CONTEXT:-""}
 # An explicit list is the whole list: there is no way to say "and also keep the
 # default context service", and silently alerting on a cache would be worse.
 [ $# -gt 0 ] && ALERTED="$*" && CONTEXT=""
@@ -81,8 +81,8 @@ images_bytes() {
     case "$raw" in
         *"EXEC_ERROR: Cannot create exec in container"*)
             # The container is not there. For these services that is an ordinary
-            # idle state, not a fault: gha-runner-cached runs with --rm and
-            # Restart=always, so it is legitimately absent between CI jobs.
+            # idle state, not a fault: a seat that is stopped, or a CI cache
+            # container that runs --rm, is legitimately absent between uses.
             REASON="not running"; return 1 ;;
         *EXEC_ERROR*)
             # Anything else from the exec path -- a dead socket, a podman error

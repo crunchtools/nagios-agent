@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- gloval's GitHub Actions runners were retired (a279), and their monitoring
+  goes with them:
+  - the `check_gha_runner_cached` and `check_gha_runner_uncached` NRPE
+    commands
+  - `deploy/nagios/gha-runner.cfg`
+  - the two `gha-runner-*` lines in `config-sources.conf`
+- `check_container_storage.sh` no longer defaults CONTEXT to
+  `gha-runner-cached`; the context-only set is empty unless CONTEXT names it.
+  Its tests use a neutral `layer-cache`, plus a case for the empty default.
+
 ## [12.0.0] - 2026-11-18
 
 ### Changed
