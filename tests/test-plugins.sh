@@ -389,6 +389,10 @@ STUB_MARKERS="$(seat exedore max1 current 0; echo 'SKILLSSYNC host=exedore seat=
     expect "an unreadable marker warns" 1 "max2: unreadable marker" any -- sk exedore
 STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 -99999999)" \
     expect "a marker written in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 60 -99999999)" \
+    expect "a fetch dated in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
+STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 behind -99999999)" \
+    expect "drift dated in the future warns" 1 "max2: marker dated .* in the future" any -- sk exedore
 STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 | sed 's/ written=/ written=0/')" \
     expect "a leading zero is decimal, not octal" 0 "^SKILLS SYNC OK - exedore: 2/2" any -- sk exedore
 STUB_MARKERS="$(seat exedore max1 current 0; seat exedore max2 current 0 2800 | sed 's/ written=/ written=0/')" \

@@ -103,8 +103,11 @@ for seat in "${expected[@]}"; do
         if ! [[ $written =~ ^[0-9]{1,11}$ && $since =~ ^[0-9]{1,11}$ && $fetched =~ ^[0-9]{1,11}$ && -n $state ]]; then
             st=1; msg="$seat: unreadable marker"
         elif written=$((10#$written)) since=$((10#$since)) fetched=$((10#$fetched))
-             [ $((written - NOW)) -gt "$SKEW" ]; then
-            st=1; msg="$seat: marker dated $(dur $((written - NOW))) in the future: the host's clock is wrong"
+             latest=$written
+             [ "$since" -gt "$latest" ] && latest=$since
+             [ "$fetched" -gt "$latest" ] && latest=$fetched
+             [ $((latest - NOW)) -gt "$SKEW" ]; then
+            st=1; msg="$seat: marker dated $(dur $((latest - NOW))) in the future: the host's clock is wrong"
         elif [ $((NOW - written)) -ge "$MARKER_STALE" ]; then
             st=1; msg="$seat: last report $(dur $((NOW - written))) ago: the sync or the push is not running"
         elif [ "$state" = current ]; then
