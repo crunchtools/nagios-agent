@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [12.0.1] - 2026-11-18
+
 ### Removed
 - gloval's GitHub Actions runners were retired (a279), and their monitoring
   goes with them:
