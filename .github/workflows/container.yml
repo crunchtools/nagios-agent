@@ -26,9 +26,10 @@ jobs:
     uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0
 
   container:
-    uses: crunchtools/constitution/.github/workflows/container-release.yml@v1.46.0
+    uses: crunchtools/constitution/.github/workflows/container-release.yml@v1.51.0
     permissions:
       contents: read
+      issues: write
       pull-requests: read
     with:
       image: quay.io/crunchtools/nagios-agent
