@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `check_openrouter_key.sh <container> <secret-name> [warn%] [crit%]`: how much
+  of an OpenRouter key's spending limit is left, WARNING at 20%, CRITICAL at 5%
+  or when OpenRouter refuses the key (a953). On 2026-11-22 Josui's key reached
+  its $150 monthly limit and three Trentina profiles lost L3 with no alert.
+  The plugin asks the trentina container to read its own secret file and call
+  `GET /api/v1/key`, so the key never reaches this agent, argv or the output;
+  only the secret's name and dollar figures come back.
+- `check_container_log_count.sh <container> <window> <warn> <crit> <label> <string>`:
+  lines of a container's log holding a fixed string within a window, read
+  through the podman socket and streamed into grep. Wired as
+  `check_trentina_l3_403` (`QuarantineAgentError status=403`, 10 minutes, WARN
+  over 5, CRIT over 20), the backstop for an L3 that is already refusing.
+- `deploy/nagios/openrouter-keys.cfg`: seven `OpenRouter Key <NAME>` services
+  and `Trentina L3 403s` on `ctr-trentina.crunchtools.com`, on the `:5667` pool.
+
 ### Changed
 - Gatehouse triage receives the review job's result (`review_result`), so a PR whose review died before posting anything is held instead of passing.
 - Promote signs the image with the fleet cosign key (`sign: true`), because

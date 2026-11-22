@@ -2446,6 +2446,122 @@ ok_if "every probe row has a Nagios service definition" test "$keys" = "$svcs"
 rm -rf "$MTD"
 trap 'rm -rf "$STUBS"' EXIT
 
+echo "=== OpenRouter key / container log count ==="
+OK_KEY="$LIBEXEC/check_openrouter_key.sh"
+LC="$LIBEXEC/check_container_log_count.sh"
+SECRET=JOSUI_OPENROUTER_API_KEY
+STUB_EXEC="KEY 100.0000 72.0000 monthly" expect "key with plenty left is OK" 0 "^OPENROUTER KEY OK - $SECRET: .*72.00 of .*100.00 left \\(72%\\), resets monthly \\| remaining=72.00;20.00;5.00;0;100.00" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 72.0000 monthly" expect "output names the env var, not a key" 0 "$SECRET" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="KEY 100.0000 17.0000 monthly" expect "17% left is WARNING" 1 "^OPENROUTER KEY WARNING - $SECRET: .*\\(17%\\)" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 3.0000 monthly" expect "3% left is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*\\(3%\\)" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 0.0000 monthly" expect "nothing left is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*\\(0%\\)" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 -1.5000 monthly" expect "overspent is CRITICAL" 2 "^OPENROUTER KEY CRITICAL" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="KEY 100.0000 20.0000 monthly" expect "exactly warn is WARNING" 1 "^OPENROUTER KEY WARNING" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 5.0000 monthly" expect "exactly crit is CRITICAL" 2 "^OPENROUTER KEY CRITICAL" yes -- "$OK_KEY" trentina "$SECRET" 20 5
+STUB_EXEC="KEY 100.0000 17.0000 monthly" expect "custom thresholds move the verdict" 0 "^OPENROUTER KEY OK" yes -- "$OK_KEY" trentina "$SECRET" 10 2
+STUB_EXEC="HTTP 403" expect "HTTP 403 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*refused the key \\(HTTP 403\\)" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="HTTP 401" expect "HTTP 401 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*refused the key \\(HTTP 401\\)" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="HTTP 500" expect "HTTP 500 is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*HTTP 500" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="NOFILE FileNotFoundError" expect "missing secret file is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: no readable secret file" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="FAIL URLError" expect "unreachable API is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*unreachable \\(URLError\\)" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="" expect "empty probe output is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: could not run the probe" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="KEY 100.0000 72.0000 monthly" STUB_EXEC_RC=7 expect "non-zero exec rc is UNKNOWN even with a KEY line" 3 "^OPENROUTER KEY UNKNOWN .*rc=7" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="KEY none none never" expect "no spending limit is OK" 0 "^OPENROUTER KEY OK - $SECRET: no spending limit set" yes -- "$OK_KEY" trentina "$SECRET"
+STUB_EXEC="KEY 100.0000 none monthly" expect "limit without limit_remaining is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN .*no limit_remaining" yes -- "$OK_KEY" trentina "$SECRET"
+expect "lowercase secret name rejected" 3 "UNKNOWN - invalid secret name" no -- "$OK_KEY" trentina josui_openrouter_api_key
+expect "secret name with path chars rejected" 3 "UNKNOWN - invalid secret name" no -- "$OK_KEY" trentina '../../etc/passwd'
+expect "secret name with a leading digit rejected" 3 "UNKNOWN - invalid secret name" no -- "$OK_KEY" trentina 1KEY
+expect "missing secret name rejected" 3 "UNKNOWN - invalid secret name" no -- "$OK_KEY" trentina
+expect "bad container name rejected" 3 "UNKNOWN - invalid container" no -- "$OK_KEY" '../x#' "$SECRET"
+expect "non-numeric threshold rejected" 3 "UNKNOWN - thresholds must be whole percents" no -- "$OK_KEY" trentina "$SECRET" 20% 5
+expect "crit above warn rejected" 3 "UNKNOWN - critical threshold above warning" no -- "$OK_KEY" trentina "$SECRET" 5 20
+
+# 3 x QuarantineAgentError status=403 among other lines.
+L3LOG=$'2026-11-22 10:00:01 INFO request ok\n2026-11-22 10:00:02 ERROR QuarantineAgentError status=403\n2026-11-22 10:00:03 ERROR QuarantineAgentError status=403 scope=key_limit\n2026-11-22 10:00:04 WARN QuarantineAgentError status=429\n2026-11-22 10:00:05 ERROR QuarantineAgentError status=403\n'
+L3S="QuarantineAgentError status=403"
+STUB_SOCK="$L3LOG" expect "count over crit is CRITICAL" 2 "^LOG COUNT CRITICAL - L3 403s: 3 in 10m in trentina \\(over 2\\) \\| lines=3;1;2;0" no -- "$LC" trentina 600 1 2 "L3 403s" "$L3S"
+STUB_SOCK="$L3LOG" expect "count between warn and crit is WARNING" 1 "^LOG COUNT WARNING - L3 403s: 3 in 10m in trentina \\(over 2\\)" no -- "$LC" trentina 600 2 5 "L3 403s" "$L3S"
+STUB_SOCK="$L3LOG" expect "count equal to warn is OK" 0 "^LOG COUNT OK - L3 403s: 3 in" no -- "$LC" trentina 600 3 5 "L3 403s" "$L3S"
+STUB_SOCK="$L3LOG" expect "count equal to crit is only WARNING" 1 "^LOG COUNT WARNING" no -- "$LC" trentina 600 1 3 "L3 403s" "$L3S"
+STUB_SOCK=$'2026-11-22 10:00:01 INFO request ok\n2026-11-22 10:00:04 WARN QuarantineAgentError status=429\n' expect "no matching line is OK with zero" 0 "^LOG COUNT OK - L3 403s: 0 in 10m in trentina \\| lines=0;5;20;0" no -- "$LC" trentina 600 5 20 "L3 403s" "$L3S"
+STUB_SOCK="" expect "empty log is OK with zero" 0 "^LOG COUNT OK - L3 403s: 0 in" no -- "$LC" trentina 600 5 20 "L3 403s" "$L3S"
+STUB_SOCK="$L3LOG" expect "string is matched literally, not as a regex" 0 "^LOG COUNT OK - x: 0 in" no -- "$LC" trentina 600 5 20 x 'status=4.3'
+STUB_SOCK="$L3LOG" expect "window rounds up to whole minutes" 2 "CRITICAL - L3 403s: 3 in 2m " no -- "$LC" trentina 61 1 2 "L3 403s" "$L3S"
+STUB_SOCK_RC=22 expect "curl failing (404 etc) is UNKNOWN, not zero" 3 "^LOG COUNT UNKNOWN - L3 403s: cannot read the log of trentina \\(curl rc=22\\)" no -- "$LC" trentina 600 5 20 "L3 403s" "$L3S"
+expect "bad container rejected" 3 "UNKNOWN - invalid container" no -- "$LC" '../x#' 600 5 20 "L3 403s" "$L3S"
+expect "zero window rejected" 3 "UNKNOWN - window, warn and crit must be whole numbers" no -- "$LC" trentina 0 5 20 "L3 403s" "$L3S"
+expect "non-numeric window rejected" 3 "UNKNOWN - window, warn and crit must be whole numbers" no -- "$LC" trentina 10m 5 20 "L3 403s" "$L3S"
+expect "non-numeric warn rejected" 3 "UNKNOWN - window, warn and crit must be whole numbers" no -- "$LC" trentina 600 x 20 "L3 403s" "$L3S"
+expect "warn above crit rejected" 3 "UNKNOWN - warning threshold above critical" no -- "$LC" trentina 600 20 5 "L3 403s" "$L3S"
+expect "missing label rejected" 3 "UNKNOWN - label and string are required" no -- "$LC" trentina 600 5 20 "" "$L3S"
+expect "missing string rejected" 3 "UNKNOWN - label and string are required" no -- "$LC" trentina 600 5 20 "L3 403s"
+expect "no args rejected" 3 "UNKNOWN" no -- "$LC"
+
+# Every key probe has an NRPE command and a Nagios service, and vice versa.
+NRPE_CTR="$HERE/../deploy/nagios-agent/nrpe-ctr.cfg"
+OR_CFG="$HERE/../deploy/nagios/openrouter-keys.cfg"
+keycmds=$(grep -E '^command\[check_openrouter_key_' "$NRPE_CTR" | grep 'check_openrouter_key\.sh' \
+          | grep -o 'command\[check_openrouter_key_[a-z0-9_]*\]' | sed 's/command\[//; s/\]//' | sort)
+keysvcs=$(grep -v '^\s*#' "$OR_CFG" | grep -o 'check_openrouter_key_[a-z0-9_]*' | sort -u)
+ok_if "key probes exist in nrpe-ctr.cfg" test -n "$keycmds"
+ok_if "every key NRPE command has a Nagios service and vice versa" test "$keycmds" = "$keysvcs"
+ok_if "every key NRPE command runs check_openrouter_key.sh" test "$(grep -cE '^command\[check_openrouter_key_' "$NRPE_CTR")" = "$(echo "$keycmds" | wc -l)"
+ok_if "L3 403 log check has an NRPE command" grep -q '^command\[check_trentina_l3_403\].*check_container_log_count\.sh' "$NRPE_CTR"
+ok_if "L3 403 log check has a Nagios service" grep -q 'check_trentina_l3_403' "$OR_CFG"
+
+# The stubs above replace the whole exec, so the probe that runs inside the
+# container is never exercised by them. These run the real embedded probe
+# locally: the exec stub drops the container name and runs the command, and a
+# sitecustomize answers urlopen with STUB_BODY (or HTTP STUB_HTTP) instead of
+# calling OpenRouter. A 200 that does not carry data.limit must not read as
+# "no spending limit set".
+PSTUBS=$(mktemp -d)
+mkdir -p "$PSTUBS/py" "$PSTUBS/secrets"
+printf 'sk-or-test\n' > "$PSTUBS/secrets/$SECRET"
+cat > "$PSTUBS/py/sitecustomize.py" <<'PYSTUB'
+import io, os, urllib.error, urllib.request
+def _urlopen(req, timeout=None):
+    if os.environ.get("STUB_HTTP"):
+        raise urllib.error.HTTPError(req.full_url, int(os.environ["STUB_HTTP"]), "stub", {}, io.BytesIO(b""))
+    return io.BytesIO(os.environ["STUB_BODY"].encode())
+urllib.request.urlopen = _urlopen
+PYSTUB
+cat > "$PSTUBS/exec" <<'STUB'
+#!/bin/bash
+touch "$STUB_EXEC_MARK"
+shift
+PYTHONPATH="$PSTUBS_PY" exec "$@"
+STUB
+chmod +x "$PSTUBS/exec"
+probe() { PODMAN_EXEC="$PSTUBS/exec" PSTUBS_PY="$PSTUBS/py" OPENROUTER_SECRETS_DIR="$PSTUBS/secrets" "$@"; }
+STUB_BODY='{"data":{"limit":150,"limit_remaining":0,"limit_reset":"monthly"}}' \
+    expect "probe: capped key is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*0.00 of .*150.00 left \\(0%\\)" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":100,"limit_remaining":72.5,"limit_reset":"monthly"}}' \
+    expect "probe: key with plenty left is OK" 0 "^OPENROUTER KEY OK - $SECRET: .*72.50 of .*100.00" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":null,"limit_remaining":null}}' \
+    expect "probe: limit null is unlimited, OK" 0 "^OPENROUTER KEY OK - $SECRET: no spending limit set" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":0,"limit_remaining":0}}' \
+    expect "probe: limit 0 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*0.00 of .*0.00 left" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{}' \
+    expect "probe: missing data is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: OpenRouter key API answered without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":null}' \
+    expect "probe: data null is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"error":{"code":403,"message":"Key limit exceeded"}}' \
+    expect "probe: error body is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"usage":12}}' \
+    expect "probe: data without limit is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='[]' \
+    expect "probe: non-object body is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='not json' \
+    expect "probe: unparseable body is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: OpenRouter key API unreachable" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='' STUB_HTTP=403 \
+    expect "probe: HTTP 403 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: OpenRouter refused the key \\(HTTP 403\\)" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":10,"limit_remaining":0}}' \
+    expect "probe: missing secret file is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - NOPE_KEY: no readable secret file" yes -- probe "$OK_KEY" trentina NOPE_KEY
+pout=$(STUB_BODY='{"data":{"limit":150,"limit_remaining":0}}' probe "$OK_KEY" trentina "$SECRET" 2>&1)
+ok_if "probe: output never carries the key" test "${pout/sk-or-test/}" = "$pout"
+rm -rf "$PSTUBS"
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))

@@ -35,7 +35,8 @@ daemon is the sole witness to its own death.
 4. **Credential liveness** — Google OAuth grants tested by asking the backend
    container to exercise its own refresh token, so the agent never reads a
    credential. `check_google_oauth.sh`. Postiz channel tokens, read from its
-   own database, `check_postiz_tokens.sh`.
+   own database, `check_postiz_tokens.sh`. OpenRouter spending limits,
+   read by the container that holds each key, `check_openrouter_key.sh`.
 5. **Edge and local services** — Cloudflare zone traffic (GraphQL Analytics)
    and incidents on the components we use, systemd unit drift,
    local TCP reachability. `check_cloudflare_status.sh`,
