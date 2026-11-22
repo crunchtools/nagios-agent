@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [13.1.0] - 2026-11-22
+
 ### Added
 - `check_openrouter_key.sh <container> <secret-name> [warn%] [crit%]`: how much
   of an OpenRouter key's spending limit is left, WARNING at 20%, CRITICAL at 5%
