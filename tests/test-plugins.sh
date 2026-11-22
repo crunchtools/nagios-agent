@@ -2509,6 +2509,59 @@ ok_if "every key NRPE command runs check_openrouter_key.sh" test "$(grep -cE '^c
 ok_if "L3 403 log check has an NRPE command" grep -q '^command\[check_trentina_l3_403\].*check_container_log_count\.sh' "$NRPE_CTR"
 ok_if "L3 403 log check has a Nagios service" grep -q 'check_trentina_l3_403' "$OR_CFG"
 
+# The stubs above replace the whole exec, so the probe that runs inside the
+# container is never exercised by them. These run the real embedded probe
+# locally: the exec stub drops the container name and runs the command, and a
+# sitecustomize answers urlopen with STUB_BODY (or HTTP STUB_HTTP) instead of
+# calling OpenRouter. A 200 that does not carry data.limit must not read as
+# "no spending limit set".
+PSTUBS=$(mktemp -d)
+mkdir -p "$PSTUBS/py" "$PSTUBS/secrets"
+printf 'sk-or-test\n' > "$PSTUBS/secrets/$SECRET"
+cat > "$PSTUBS/py/sitecustomize.py" <<'PYSTUB'
+import io, os, urllib.error, urllib.request
+def _urlopen(req, timeout=None):
+    if os.environ.get("STUB_HTTP"):
+        raise urllib.error.HTTPError(req.full_url, int(os.environ["STUB_HTTP"]), "stub", {}, io.BytesIO(b""))
+    return io.BytesIO(os.environ["STUB_BODY"].encode())
+urllib.request.urlopen = _urlopen
+PYSTUB
+cat > "$PSTUBS/exec" <<'STUB'
+#!/bin/bash
+touch "$STUB_EXEC_MARK"
+shift
+PYTHONPATH="$PSTUBS_PY" exec "$@"
+STUB
+chmod +x "$PSTUBS/exec"
+probe() { PODMAN_EXEC="$PSTUBS/exec" PSTUBS_PY="$PSTUBS/py" OPENROUTER_SECRETS_DIR="$PSTUBS/secrets" "$@"; }
+STUB_BODY='{"data":{"limit":150,"limit_remaining":0,"limit_reset":"monthly"}}' \
+    expect "probe: capped key is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*0.00 of .*150.00 left \\(0%\\)" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":100,"limit_remaining":72.5,"limit_reset":"monthly"}}' \
+    expect "probe: key with plenty left is OK" 0 "^OPENROUTER KEY OK - $SECRET: .*72.50 of .*100.00" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":null,"limit_remaining":null}}' \
+    expect "probe: limit null is unlimited, OK" 0 "^OPENROUTER KEY OK - $SECRET: no spending limit set" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":0,"limit_remaining":0}}' \
+    expect "probe: limit 0 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: .*0.00 of .*0.00 left" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{}' \
+    expect "probe: missing data is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: OpenRouter key API answered without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":null}' \
+    expect "probe: data null is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"error":{"code":403,"message":"Key limit exceeded"}}' \
+    expect "probe: error body is UNKNOWN, not OK" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"usage":12}}' \
+    expect "probe: data without limit is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='[]' \
+    expect "probe: non-object body is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: .*without a limit field" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='not json' \
+    expect "probe: unparseable body is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - $SECRET: OpenRouter key API unreachable" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='' STUB_HTTP=403 \
+    expect "probe: HTTP 403 is CRITICAL" 2 "^OPENROUTER KEY CRITICAL - $SECRET: OpenRouter refused the key \\(HTTP 403\\)" yes -- probe "$OK_KEY" trentina "$SECRET"
+STUB_BODY='{"data":{"limit":10,"limit_remaining":0}}' \
+    expect "probe: missing secret file is UNKNOWN" 3 "^OPENROUTER KEY UNKNOWN - NOPE_KEY: no readable secret file" yes -- probe "$OK_KEY" trentina NOPE_KEY
+pout=$(STUB_BODY='{"data":{"limit":150,"limit_remaining":0}}' probe "$OK_KEY" trentina "$SECRET" 2>&1)
+ok_if "probe: output never carries the key" test "${pout/sk-or-test/}" = "$pout"
+rm -rf "$PSTUBS"
+
 echo "=== Hermes probes (python unittest) ==="
 if UT=$(python3 -m unittest -q "$HERE/test_hermes_probes.py" 2>&1); then
     echo "  PASS: probe unit tests ($(echo "$UT" | grep -o 'Ran [0-9]* tests'))"; PASS=$((PASS + 1))

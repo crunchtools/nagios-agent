@@ -49,11 +49,16 @@ except OSError as e:
 req = urllib.request.Request("https://openrouter.ai/api/v1/key", headers={"Authorization": "Bearer " + key})
 try:
     with urllib.request.urlopen(req, timeout=15) as r:
-        d = json.load(r).get("data") or {}
+        body = json.load(r)
 except urllib.error.HTTPError as e:
     print("HTTP", e.code); sys.exit(0)
 except Exception as e:
     print("FAIL", type(e).__name__); sys.exit(0)
+# A null limit means unlimited, so only an object that HAS the key may say so.
+# A body without one (no data, data null, an error body) is not an answer.
+d = body.get("data") if isinstance(body, dict) else None
+if not isinstance(d, dict) or "limit" not in d:
+    print("BADBODY"); sys.exit(0)
 def num(v):
     return "none" if v is None else "%.4f" % float(v)
 print("KEY", num(d.get("limit")), num(d.get("limit_remaining")), d.get("limit_reset") or "never")
@@ -61,13 +66,14 @@ PYEOF
 
 OUT=$("$EXEC" "$CONTAINER" python3 -c "$PY" "$SECRETS_DIR" "$NAME" 2>&1)
 RC=$?
-LINE=$(grep -E '^(KEY|HTTP|NOFILE|FAIL) ' <<<"$OUT" | tail -1)
+LINE=$(grep -E '^(KEY|HTTP|NOFILE|FAIL) |^BADBODY$' <<<"$OUT" | tail -1)
 [ "$RC" -eq 0 ] && [ -n "$LINE" ] || unknown "$NAME: could not run the probe in $CONTAINER (rc=$RC)"
 
 read -r KIND A B C <<<"$LINE"
 case "$KIND" in
     NOFILE) unknown "$NAME: no readable secret file in $CONTAINER" ;;
     FAIL)   unknown "$NAME: OpenRouter key API unreachable ($A)" ;;
+    BADBODY) unknown "$NAME: OpenRouter key API answered without a limit field" ;;
     HTTP)
         case "$A" in
             401|403) echo "OPENROUTER KEY CRITICAL - $NAME: OpenRouter refused the key (HTTP $A)"; exit 2 ;;
