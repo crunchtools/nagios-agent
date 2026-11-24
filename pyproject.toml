@@ -54,3 +54,9 @@ skip = ["semgrep"]
 
 [tool.sdlc]
 repo-kinds = ["container-image"]
+
+[tool.sdlc.image]
+# Written by crunchtools/sdlc's scripts/convert_repo.py: moved from the workflows.
+image = "quay.io/crunchtools/nagios-agent"
+boot = "command"
+boot-command = "command -v gawk >/dev/null || sudo apt-get install -y gawk\nbash tests/test-image.sh\n"
