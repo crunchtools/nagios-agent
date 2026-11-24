@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- README's Documentation table linked `.specify/memory/constitution.md`, which
+  the constitution v2 move deleted; Gourmand's CQ012 failed on it (a1210). The
+  row now points at `pyproject.toml`'s `[tool.sdlc] repo-kinds`.
+
 ## [13.1.0] - 2026-11-22
 
 ### Added

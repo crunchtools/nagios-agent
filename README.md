@@ -210,7 +210,7 @@ CI runs the build, `tests/test-image.sh`, Gourmand (blocking) and Gatehouse
 
 | Page | Contents |
 |------|----------|
-| [`.specify/memory/constitution.md`](.specify/memory/constitution.md) | Per-repo constitution — profile, deployment topology, plugin rules |
+| [`pyproject.toml`](pyproject.toml) | `[tool.sdlc] repo-kinds` — the constitution profile this repo declares |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
 | [`crunchtools/constitution`](https://github.com/crunchtools/constitution) | Universal rules; XVI (monitoring) and XVII (secrets) apply most here |
 | [`crunchtools/nagios`](https://github.com/crunchtools/nagios) | The server that queries this agent |
