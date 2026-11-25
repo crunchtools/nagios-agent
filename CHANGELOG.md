@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `registry-images.conf` and `cve-baseline.conf` follow two image renames:
+  `kill-the-newsletter` is now `newsletter` and `mundo-de-palabras` is now
+  `spanish` (a1401). The newsletter's accepted CVE pairs move to
+  `quay.io/crunchtools/newsletter:latest`, because the baseline keys on the exact
+  ref and the old pairs would otherwise make the same backlog page as new.
+
 ## [13.1.0] - 2026-11-22
 
 ### Added
