@@ -5,3 +5,19 @@ file = "rootfs/usr/local/nagios/libexec/check_skills_sync.sh"
 evidence = "MARKER_STALE=${MARKER_STALE:-2700}"
 status = "not-a-bug"
 reason = "check_skills_sync.sh has never been released: it is in CHANGELOG Unreleased under Added (#187, merged, not yet tagged). No released plugin's verdict changes; the 45m threshold ships in the same release that introduces the plugin."
+
+[[findings]]
+agent = "constitution"
+category = "constitution"
+file = "tests/Containerfile.plugins"
+evidence = "RUN dnf -y -q install --setopt=install_weak_deps=False \\\n        bash gawk python3 util-linux diffutils sqlite findutils procps-ng iproute \\\n        coreutils grep sed jq git-core curl"
+status = "not-a-bug"
+reason = "a test-only harness for tests/test-plugins.sh, built in the check job and never published or deployed; it replaces the GitHub runner's live apt packages that ran the suite before, and the base is pinned by digest, so S1's shipped-dependency lock does not apply."
+
+[[findings]]
+agent = "constitution"
+category = "constitution"
+file = "pyproject.toml"
+evidence = "[tool.sdlc.ci.image-gate]\nkind = \"command\"\nimage = \"localhost/nagios-agent:sdlc\"\nargv = [\"bash\", \"tests/image/boot-check.sh\"]"
+status = "not-a-bug"
+reason = "sdlc 0.15's image job cannot gate the pushed digest with a command (crunchtools/sdlc#118, open); without this check the cutover would gate nothing. It runs on the image built from the same commit and Containerfile, and gating the digest itself returns when sdlc#118 lands."

@@ -58,5 +58,43 @@ repo-kinds = ["container-image"]
 [tool.sdlc.image]
 # Written by crunchtools/sdlc's scripts/convert_repo.py: moved from the workflows.
 image = "quay.io/crunchtools/nagios-agent"
-boot = "command"
-boot-command = "command -v gawk >/dev/null || sudo apt-get install -y gawk\nbash tests/test-image.sh\n"
+# NRPE is a bare daemon: no units, no HEALTHCHECK, and no stdio or HTTP server
+# for the mcp profiles. The gate it ran lives in `image-gate` below.
+boot = "none"
+boot-none-reason = "NRPE daemon with no units or HEALTHCHECK; the image-gate ci check asserts nrpe, its config, plugins and libraries inside this image (nrpe itself cannot start with no capabilities)"
+
+[tool.sdlc.ci]
+checks = ["nagios-agent-image", "image-gate", "plugin-harness", "plugin-tests", "hermes-probes"]
+
+[tool.sdlc.ci.nagios-agent-image]
+kind = "image-build"
+
+# What tests/test-image.sh asserted, run inside the built image instead of
+# driven from outside by podman (tests/image/boot-check.sh). argv[0] replaces
+# the image's NRPE entrypoint. Not the nrpe-running and port-5666 checks: with
+# every capability dropped nrpe exits at startup, so the script asserts its
+# shared libraries instead.
+[tool.sdlc.ci.image-gate]
+kind = "command"
+image = "localhost/nagios-agent:sdlc"
+argv = ["bash", "tests/image/boot-check.sh"]
+
+# The offline plugin suite, which test-image.sh ran last on the GitHub runner.
+# It stubs curl, rclone and the podman socket against the repo's own rootfs, so
+# it needs no nagios-agent image, only the runner's tools (flock, cmp, sqlite3,
+# gawk, python3): tests/Containerfile.plugins. No gawk apt-get needed any more.
+[tool.sdlc.ci.plugin-harness]
+kind = "image-build"
+containerfile = "tests/Containerfile.plugins"
+context = "tests"
+tag = "localhost/nagios-agent:plugins"
+
+[tool.sdlc.ci.plugin-tests]
+kind = "command"
+image = "localhost/nagios-agent:plugins"
+argv = ["bash", "tests/test-plugins.sh"]
+
+# The Hermes probe unittests, on the gate's own python 3.14.
+[tool.sdlc.ci.hermes-probes]
+kind = "command"
+argv = ["python3", "-m", "unittest", "-q", "tests/test_hermes_probes.py"]
