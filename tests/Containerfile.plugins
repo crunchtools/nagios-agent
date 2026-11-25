@@ -1,0 +1,10 @@
+# The harness tests/test-plugins.sh runs in (the `plugin-tests` check). The suite
+# is offline and stubs curl, rclone and the podman socket against the repo's own
+# rootfs, so it needs no nagios-agent image: only bash and the tools the plugins
+# and the suite call, python3 among them for the embedded probes. It was the
+# GitHub runner's job before the fleet ci.yml.
+FROM registry.fedoraproject.org/fedora:43@sha256:59be9ed15831f74e408c5f3d59fc77fc8371f4642de2673c16c37e880b4dd937
+RUN dnf -y -q install --setopt=install_weak_deps=False \
+        bash gawk python3 util-linux diffutils sqlite findutils procps-ng iproute \
+        coreutils grep sed jq git-core curl \
+    && dnf clean all
