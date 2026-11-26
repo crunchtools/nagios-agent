@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- The `linux-mcp-server` checks: the NRPE command `check_linux_mcp_server`,
+  the `Linux MCP Server` service definition, and its config-sources mapping.
+  The server was decommissioned on gloval; it was never used.
+
 ### Changed
 - `registry-images.conf` and `cve-baseline.conf` follow two image renames:
   `kill-the-newsletter` is now `newsletter` and `mundo-de-palabras` is now
